@@ -1,0 +1,141 @@
+# DataSeeder: Product Requirements Document (MVP)
+
+
+## Overview
+DataSeeder is an AI-powered native app that generates realistic, contextually relevant test data in Salesforce. It supports creating related records with localization and industry-specific content. The application leverages LLM technology specifically to populate field values for records based on configured objects and relationships.
+
+
+## Target Users
+- QA Engineers
+- Business Analysts
+- Developers
+- Administrators
+
+
+## MVP Limitations
+- Maximum of 15 fields supported per object in a template
+- Template sharing between users not supported in MVP
+- Maximum of 3 levels of object dependency relationships (e.g., Parent → Child → Grandchild)
+- Maximum of 50 total records created per execution
+
+
+## MVP Layers and Dependencies
+
+
+### 1. Database/Object Model [DB-LAYER]
+- [DB-REQ-1] JSON mapping schema for target objects and fields
+ - Must include: DataType, Required flag, Length, Picklist values, Range constraints, Uniqueness requirements
+ - Limited to 15 fields per object level in a template
+- [DB-REQ-2] Relationship mapping between parent-child objects
+ - Support up to 3 levels of object relationships (Parent → Child → Grandchild)
+- [DB-REQ-3] Population percentage configuration per object
+ - Limited to a combined total of 50 records across all objects
+- [DB-REQ-4] Template storage using DataSeederTemplate__c custom object
+ - Stores configuration JSON for reuse
+ - Dependencies: None
+
+
+### 2. Permissions [PERM-LAYER]
+- [PERM-REQ-1] Admin Permission Set for full system configuration
+- [PERM-REQ-2] End User Permission Set with restricted capabilities
+ - Dependencies: [DB-LAYER]
+
+
+### 3. Apex Classes [APEX-LAYER]
+- [APEX-REQ-1] Data generation service
+ - Parse configuration JSON
+ - Interface with LLM API to generate field values for records
+ - Generate data structure for up to 50 records based on configuration
+ - Enforce 15-field per object limit validation
+ - Enforce maximum of 3 levels of object relationships
+ - Enforce maximum of 50 total records
+- [APEX-REQ-2] Data insertion service with transaction management
+ - Support for rollback mode
+ - Error logging and handling
+ - Handle hierarchical insertion of up to 3 object levels
+- [APEX-REQ-3] Template management service
+ - Save and load templates
+ - Import/Export template configurations
+ - Validate field limits and JSON structure
+ - Dependencies: [PERM-LAYER], [DB-LAYER]
+
+
+### 4. Lightning Web Components [LWC-LAYER]
+- [LWC-REQ-1] Seeder Configuration Component
+ - Object and field selection interface
+ - Related object configuration (up to 3 levels)
+ - Record count specification with max 50 total indicator
+ - Localization/Industry/Region/Business requirements input
+ - Field count indicator/limiter (15 max per object)
+- [LWC-REQ-2] Data Preview Component
+ - Show generated data before insertion
+ - Real-time progress indicators during insertion
+ - Success/failure reporting
+- [LWC-REQ-3] Template Management UI
+ - Save current configuration as template
+ - Load existing templates
+ - Import/Export template configurations
+ - Dependencies: [APEX-LAYER], [PERM-LAYER], [DB-LAYER]
+
+
+## MVP Requirements Matrix
+
+
+| ID | Requirement | Priority | Layer | Dependencies |
+|----|-------------|----------|-------|--------------|
+| R1 | Select objects and related objects (max 3 levels) | Must Have | [LWC-LAYER] | [DB-LAYER] |
+| R2 | Choose number of records per object (max 50 total) | Must Have | [LWC-LAYER] | [DB-LAYER] |
+| R3 | Select specific fields per object (max 15 per object) | Must Have | [LWC-LAYER] | [DB-LAYER] |
+| R4 | Generate data model JSON mapping | Must Have | [APEX-LAYER] | [DB-LAYER] |
+| R5 | Test mapping in rollback mode | Must Have | [APEX-LAYER] | [DB-LAYER] |
+| R6 | Preview data before insertion | Nice to Have | [LWC-LAYER] | [APEX-LAYER] |
+| R7 | Real-time insertion progress | Must Have | [LWC-LAYER] | [APEX-LAYER] |
+| R8 | Save/load configuration templates | Must Have | [LWC-LAYER], [APEX-LAYER] | [DB-LAYER] |
+| R9 | Support for custom LLM integration | Must Have | [APEX-LAYER] | None |
+| R10 | Admin and User Permission Sets | Must Have | [PERM-LAYER] | [DB-LAYER] |
+| R11 | Exception handling and logging | Must Have | [APEX-LAYER] | None |
+| R12 | Field limit validation (15 per object) | Must Have | [APEX-LAYER] | [DB-LAYER] |
+| R13 | Object relationship depth validation (max 3) | Must Have | [APEX-LAYER] | [DB-LAYER] |
+| R14 | Total record count validation (max 50) | Must Have | [APEX-LAYER] | [DB-LAYER] |
+| R15 | LLM-powered field value generation | Must Have | [APEX-LAYER] | None |
+
+
+## Technical Architecture
+
+
+### Data Flow
+1. User configures data generation settings via LWC interface
+2. Settings stored as JSON configuration
+3. Apex controller processes configuration
+4. LLM integration generates realistic field values for up to 50 records
+5. Data validated against schema
+6. Records inserted with proper relationship hierarchy (up to 3 levels)
+7. Results reported back to user interface
+
+
+### Template Storage
+- Custom Object: DataSeederTemplate__c
+ - Name (Template name)
+ - Description__c (Template purpose)
+ - ConfigurationJSON__c (Entire configuration in JSON format)
+ - IsActive__c (Whether template is available)
+ - Standard CreatedBy/LastModifiedBy fields
+
+
+### AI Integration
+- Static AI Prompt template for record generation
+- LLM responsible specifically for generating realistic field values based on:
+ - Field data types
+ - Localization requirements (including language)
+ - Region-specific requirements
+ - Industry context
+ - Business use case requirements
+- Two JSON inputs:
+ - JSON1: Structure definition (output template)
+ - JSON2: Metadata (data types, constraints, localization, industry specifics)
+
+
+### Component Dependencies
+- Seeder Configuration LWC → Apex Data Generation Service → Database
+- Data Preview LWC → Apex Data Insertion Service → Database
+- Template Management LWC → Apex Template Service → DataSeederTemplate__c

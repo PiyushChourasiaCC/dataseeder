@@ -1,0 +1,232 @@
+# SALESFORCE DATASEEDER PROJECT IMPLEMENTATION CHECKLIST
+
+This checklist provides sequential steps for implementing the DataSeeder application in Salesforce according to the PRD. Tasks are organized by layer, respecting dependencies and Salesforce platform constraints.
+
+## Salesforce Platform Context
+This project is built entirely on the Salesforce platform using:
+- Apex (Salesforce's proprietary programming language)
+- Lightning Web Components (LWC)
+- Custom Objects & Fields
+- Permission Sets
+- Salesforce DML & SOQL Operations
+- Custom Metadata Types
+- Lightning Design System (SLDS)
+
+All implementation must adhere to Salesforce governor limits, security model, and deployment practices.
+
+## AI Agent Instructions
+**IMPORTANT:** AI agent must stop and wait for user confirmation after completing each checkbox item. Do not proceed to the next task until explicitly instructed by the user. Each checkbox represents a discrete unit of work that requires validation before continuing.
+
+## 1. Database/Object Model (DB-LAYER)
+
+### Salesforce Data Model Considerations
+- Custom Objects have a __c suffix (e.g., DataSeederTemplate__c)
+- Custom Fields have a __c suffix (e.g., Description__c)
+- System fields like Id, CreatedById are automatically provided
+- Relationship fields end with __r for the relationship and __c for the ID field
+- Salesforce enforces Field-Level Security and Object-Level Security
+- Standard Objects (Account, Contact, etc.) have their own field limits
+- Metadata deployment must include both object and field definitions
+
+1 [ ] **1. DB-REQ-1: Create JSON mapping schema**
+  [ ]  2. Define schema structure for target Salesforce standard and custom objects and fields
+  [ ]  3. Include Salesforce field metadata: Data Type, Required flag, Length, Picklist values, Range constraints, Uniqueness
+  [ ]  4. Verify support for 15 fields per object level (respecting Salesforce field limits)
+  [ ]  5. *Check off when: Schema is documented and validated against sample Salesforce objects*
+
+6 [ ] **2. DB-REQ-2: Implement relationship mappings**
+   [ ] 7. Define Salesforce relationship types (Lookup, Master-Detail) in schema
+   [ ] 8. Support standard Salesforce relationship notation (parent_r.field_c format)
+   [ ] 9. Ensure support for up to 3 levels of relationships (respecting Salesforce query limitations)
+   [ ] 10. Test with sample hierarchical data using Salesforce relationship queries
+   [ ] 11. *Check off when: Relationship mapping successfully represents Salesforce object hierarchies*
+
+12 [ ] **3. DB-REQ-3: Create population percentage configuration**
+   [ ] 13. Implement record count/percentage specification per object (with consideration for Salesforce governor limits)
+   [ ] 14. Add validation for 50 total records limit across all objects (to avoid bulk DML limits)
+   [ ] 15. Configure batch size settings to respect Salesforce governor limits
+   [ ] 16. *Check off when: Configuration correctly calculates and enforces record limits within Salesforce constraints*
+
+17 [ ] **4. DB-REQ-4: Implement context-specific data generation configuration**
+   [ ] 18. Add configuration options for localization/language preferences
+   [ ] 19. Support industry-specific context parameters
+   [ ] 20. Include regional/geographic context settings
+   [ ] 21. Ensure these context parameters are passed to the LLM for generating relevant test data
+   [ ] 22. Add validation for context parameter format and values
+   [ ] 23. *Check off when: Configuration correctly captures and utilizes context parameters to generate relevant data*
+
+24 [ ] **5. DB-REQ-5: Create template storage object**
+   [ ] 25. Create DataSeederTemplate__c custom object with:
+   [ ]     26. Name (Text field, 80 character limit, Template name)
+   [ ]     27. Description__c (Long Text Area, 32,000 character limit, Template purpose)
+   [ ]     28. ConfigurationJSON__c (Long Text Area, 131,072 character limit, Configuration in JSON format)
+   [ ]     29. IsActive__c (Checkbox field, Availability flag)
+   [ ]     30. CreatedById (System field, stores user who created the template)
+   [ ]     31. LastModifiedById (System field, tracks last modification)
+   [ ] 32. Add appropriate field-level security settings and page layouts
+   [ ] 33. Create custom tabs and list views for the new object
+   [ ] 34. *Check off when: Custom object is created in Salesforce and can store/retrieve sample configuration*
+
+## 2. Permissions (PERM-LAYER)
+
+### Salesforce Security Model
+- Profiles control baseline object and field access
+- Permission Sets provide additive permissions beyond profiles
+- Field-Level Security controls visibility and editability of fields
+- Object-Level Security controls Create/Read/Edit/Delete permissions
+- Apex classes require explicit permissions for non-admin users
+- Organization-Wide Defaults (OWDs) set baseline sharing model
+- Sharing Rules can extend access beyond OWDs
+- Record-Level security enforced via ownership and sharing
+
+36 [ ] **6. PERM-REQ-1: Create Admin Permission Set**
+   [ ] 37. Configure Salesforce Permission Set with:
+   [ ]     38. Custom Object Permissions: CRUD on DataSeederTemplate__c
+   [ ]     39. Apex Class access permissions for all DataSeeder classes
+   [ ]     40. Custom Tab visibility for all DataSeeder tabs
+   [ ]     41. Field-Level Security settings for all DataSeederTemplate__c fields
+   [ ] 42. Assign to System Administrator profile or designated admin users
+   [ ] 43. *Check off when: Permission set created and verified with admin user in Salesforce*
+
+44 [ ] **7. PERM-REQ-2: Create End User Permission Set**
+   [ ] 45. Configure Salesforce Permission Set with: 
+   [ ]     46. Custom Object permissions: Read on DataSeederTemplate__c, Create on generated data object
+   [ ]     47. Restricted Field-Level Security (no access to sensitive fields)
+   [ ]     48. Apex Class access for user-facing functionality only
+   [ ]     49. Custom Tab visibility for user-facing tabs only
+   [ ] 50. *Check off when: Permission set created and verified with non-admin user in Salesforce*
+
+## 3. Apex Classes (APEX-LAYER)
+
+### Salesforce Apex Development Rules
+- All Apex classes must have corresponding test classes with >75% code coverage
+- Include .cls-meta.xml files for each Apex class with latest API version
+- Follow Salesforce bulkification best practices to respect governor limits
+- Implement proper error handling and exception management
+- Use System.debug() statements strategically (they count against CPU limits)
+- Consider @AuraEnabled methods for LWC integration
+
+51 [ ] **8. APEX-REQ-1: Implement Data Generation Service**
+   [ ] 51. Create Apex class to parse configuration JSON (respecting Apex heap size limits)
+   [ ] 52. Implement Salesforce Named Credential and Callout for LLM API integration
+   [ ] 53. Build data structure generator using Salesforce SObject constructors
+   [ ] 54. Add validation mechanisms for:
+   [ ]     55. 15-field per object limit (Salesforce custom object field limit awareness)
+   [ ]     56. Maximum 3 levels of object relationships (SOQL query depth limitation)
+   [ ]     57. Maximum 50 total records (to stay within governor limits)
+   [ ]     58. Implement bulkification patterns to respect Salesforce governor limits
+   [ ] 59. *Check off when: Service generates valid SObject collections based on configuration*
+
+60 [ ] **9. APEX-REQ-2: Implement Data Insertion Service**
+   [ ] 61. Create Salesforce Database.Savepoint transaction management with rollback support
+   [ ] 62. Implement custom Apex error logging to Platform Events or Custom Object
+   [ ] 63. Build hierarchical insertion logic using Salesforce DML operations
+   [ ] 64. Add @future or Queueable methods for handling complex operations asynchronously
+   [ ] 65. *Check off when: Service correctly inserts test records using Salesforce DML operations*
+
+66 [ ] **10. APEX-REQ-3: Implement Template Management Service**
+   [ ] 67. Create Apex methods using SOQL/DML to manage DataSeederTemplate__c records
+   [ ] 68. Add import/export functionality using Salesforce Content Document/Attachment APIs
+   [ ] 69. Implement validation for JSON structure using JSON.deserializeUntyped()
+   [ ] 70. Create Apex test classes with >75% code coverage
+   [ ] 71. *Check off when: Service successfully performs CRUD operations on template records*
+
+## 4. Lightning Web Components (LWC-LAYER)
+
+### Salesforce LWC Development Rules
+- Follow Salesforce Lightning Design System (SLDS) guidelines
+- Use Salesforce Base Lightning Components where applicable
+- Ensure components work in both Lightning Experience and Salesforce Mobile
+- Maintain component communication via LMS or pubsub patterns
+- Consider @wire adapters for data retrieval
+- Follow Salesforce security best practices (e.g., with-sharing classes)
+
+73 [ ] **11. LWC-REQ-1: Build Seeder Configuration Component**
+   [ ] 74. Create LWC using Salesforce Lightning Design System (SLDS) components
+   [ ] 75. Implement object selector using Salesforce UI-API for metadata retrieval
+   [ ] 76. Add field selector using Salesforce Schema describe calls
+   [ ] 77. Implement related object configuration using SLDS tree components
+   [ ] 78. Add record count specification with Salesforce input validation
+   [ ] 79. Include Lightning Message Service for component communication
+   [ ] 80. *Check off when: UI allows complete configuration using SLDS components*
+
+81 [ ] **12. LWC-REQ-2: Build Data Preview Component**
+   [ ] 82. Create interface using Salesforce lightning-datatable component
+   [ ] 83. Implement lightning-spinner for progress indicators during operations
+   [ ] 84. Add lightning-card for success/failure reporting
+   [ ] 85. Use Salesforce Toast notifications for user feedback
+   [ ] 86. *Check off when: Component successfully previews data using Salesforce Lightning components*
+
+87 [ ] **13. LWC-REQ-3: Build Template Management UI**
+   [ ] 88. Create lightning-record-edit-form for template management
+   [ ] 89. Implement template loading with lightning-combobox for selection
+   [ ] 90. Add import/export using Salesforce file upload components
+   [ ] 91. Configure Lightning App Builder flexibility with design attributes
+   [ ] 92. *Check off when: UI successfully manages templates using Salesforce Lightning components*
+
+## 5. Deployment & Configuration (DEPLOY-LAYER)
+
+### Salesforce Deployment Practices
+- Use Salesforce DX for source-tracked development
+- Maintain package.xml with correct API versions for all components
+- Test deployments in sandbox environments before production
+- Follow Salesforce change set or SFDX deployment methodologies
+- Consider environment-specific configuration variables
+
+93 [ ] **14. DEPLOY-REQ-1: Create Salesforce Packages**
+   [ ] 94. Build SFDX project structure for all components
+   [ ] 95. Create package.xml with all necessary metadata components
+   [ ] 96. Configure deployment scripts for CI/CD integration
+   [ ] 97. *Check off when: Package successfully builds with all components*
+
+98 [ ] **15. DEPLOY-REQ-2: Configure Custom Settings/Metadata**
+   [ ] 99. Create Custom Metadata Type or Custom Setting for configuration values
+   [ ] 100. Add remote site settings for external API integration
+   [ ] 101. Configure Named Credentials for secure API authentication
+   [ ] 102. *Check off when: All configuration metadata is properly defined*
+
+## 6. Final Verification (SALESFORCE-SPECIFIC)
+103 [ ] **16. Test end-to-end workflow**
+   [ ] 104. Validate all operations against Salesforce governor limits
+   [ ] 105. Test with Salesforce standard and custom objects
+   [ ] 106. Verify deployment in sandbox environment
+   [ ] 107. *Check off when: Complete workflow functions without hitting any Salesforce limits*
+
+108 [ ] **17. Validate all MVP requirements**
+   [ ] 109. Review Requirements Matrix (R1-R15) against implementation
+   [ ] 110. Verify all "Must Have" items are complete and respect Salesforce standards
+   [ ] 111. Document status of "Nice to Have" items
+   [ ] 112. *Check off when: All MVP requirements confirmed as implemented within Salesforce constraints*
+
+113 [ ] **18. Perform user acceptance testing**
+   [ ] 114. Test with all user types in Salesforce environment
+   [ ] 115. Collect and address feedback
+   [ ] 116. Verify Lightning Experience compatibility
+   [ ] 117. Test mobile responsiveness in Salesforce mobile app
+   [ ] 118. *Check off when: Representatives from each user group confirm usability in Salesforce*
+
+## Salesforce Glossary for AI Agent Reference
+
+**Apex**: Salesforce's proprietary programming language with Java-like syntax used for backend development.
+
+**API Version**: Salesforce releases three major versions yearly. Each component must specify which API version it uses.
+
+**Custom Object**: Salesforce data table that stores information specific to an organization's process.
+
+**DML (Data Manipulation Language)**: Operations used to insert, update, delete, or upsert Salesforce records.
+
+**Governor Limits**: Runtime limits enforced by Salesforce to ensure multi-tenant architecture stability.
+
+**LWC (Lightning Web Components)**: Salesforce's UI development framework using modern web standards.
+
+**Permission Set**: Collection of settings and permissions that give users access to tools and functions.
+
+**SFDX (Salesforce Developer Experience)**: Modern development tools and workflows for Salesforce development.
+
+**SLDS (Salesforce Lightning Design System)**: CSS framework providing design patterns and components.
+
+**SOQL (Salesforce Object Query Language)**: Database query language similar to SQL but optimized for Salesforce data.
+
+**SObject**: Salesforce's representation of database objects/records in Apex.
+
+**Bulkification**: Pattern of processing records in batches rather than individually to avoid governor limits.
