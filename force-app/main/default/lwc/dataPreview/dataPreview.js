@@ -15,6 +15,7 @@ export default class DataPreview extends LightningElement {
     @track objectMap = new Map();
     @track displayedObject;
     @track objectOptions = [];
+    @track noValidRecords = false;
 
     /**
      * Computed property to check if data is empty
@@ -39,6 +40,7 @@ export default class DataPreview extends LightningElement {
         this.previewData = [];
         this.columns = [];
         this.objectMap.clear();
+        this.noValidRecords = false;
         
         generateData({ configJson: this.configJson })
             .then(result => {
@@ -52,34 +54,46 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
-     * Process the generated data for display
+     * Process data returned from the Apex method
      */
-    processGeneratedData(data) {
-        if (!data || Object.keys(data).length === 0) {
-            this.error = 'No data was generated';
-            return;
-        }
-
-        // Store data by object type
-        for (const [objectName, records] of Object.entries(data)) {
-            if (records && records.length > 0) {
-                this.objectMap.set(objectName, records);
+    processGeneratedData(result) {
+        try {
+            this.isLoading = false;
+            this.error = null;
+            
+            // Clear any previous data
+            this.objectMap = new Map();
+            
+            if (!result || Object.keys(result).length === 0) {
+                this.error = 'No data was returned from the server. Please check your configuration.';
+                console.error('Data generation returned empty result:', result);
+                return;
             }
+            
+            // Process each object's records
+            for (const [objectName, records] of Object.entries(result)) {
+                if (records && records.length > 0) {
+                    this.objectMap.set(objectName, records);
+                }
+            }
+            
+            // Create options for object selection
+            this.objectOptions = Array.from(this.objectMap.keys()).map(key => ({
+                label: key,
+                value: key
+            }));
+            
+            // Default to first object
+            if (this.objectOptions.length > 0) {
+                this.displayedObject = this.objectOptions[0].value;
+                this.updateDisplayedData();
+            } else {
+                this.error = 'No valid SObject records were generated. Check that required fields have valid values.';
+                console.error('No valid SObjects in result:', result);
+            }
+        } catch (error) {
+            this.handleError(error);
         }
-
-        // Create options for object selection
-        this.objectOptions = Array.from(this.objectMap.keys()).map(key => ({
-            label: key,
-            value: key
-        }));
-
-        // Default to first object
-        if (this.objectOptions.length > 0) {
-            this.displayedObject = this.objectOptions[0].value;
-            this.updateDisplayedData();
-        }
-
-        this.successMessage = `Successfully generated sample data for ${this.objectOptions.length} object(s)`;
     }
 
     /**
@@ -95,37 +109,59 @@ export default class DataPreview extends LightningElement {
         const records = this.objectMap.get(this.displayedObject);
         
         if (!records || records.length === 0) {
+            this.noValidRecords = true;
             return;
         }
 
-        // Create columns based on first record
-        const firstRecord = records[0];
-        const fields = Object.keys(firstRecord).filter(field => 
-            field !== 'Id' && field !== 'attributes'
-        );
-
-        this.columns = fields.map(fieldName => ({
-            label: fieldName,
-            fieldName: fieldName,
-            type: this.determineColumnType(firstRecord[fieldName])
-        }));
-
-        // Create data array for lightning-datatable
-        this.previewData = records.map((record, index) => {
-            const row = { ...record, key: index };
+        try {
+            // Create columns based on first record
+            const firstRecord = records[0];
             
-            // Handle nested or special types for display
-            fields.forEach(field => {
-                if (record[field] === null || record[field] === undefined) {
-                    row[field] = '';
-                } else if (typeof record[field] === 'object') {
-                    // Stringify objects for display
-                    row[field] = JSON.stringify(record[field]);
-                }
+            // Check if we have a valid SObject record
+            if (!firstRecord || !firstRecord.attributes) {
+                this.noValidRecords = true;
+                return;
+            }
+            
+            const fields = Object.keys(firstRecord).filter(field => 
+                field !== 'Id' && field !== 'attributes'
+            );
+
+            if (fields.length === 0) {
+                this.noValidRecords = true;
+                return;
+            }
+
+            this.columns = fields.map(fieldName => ({
+                label: fieldName,
+                fieldName: fieldName,
+                type: this.determineColumnType(firstRecord[fieldName])
+            }));
+
+            // Create data array for lightning-datatable
+            this.previewData = records.map((record, index) => {
+                const row = { ...record, key: index };
+                
+                // Handle nested or special types for display
+                fields.forEach(field => {
+                    if (record[field] === null || record[field] === undefined) {
+                        row[field] = '';
+                    } else if (typeof record[field] === 'object') {
+                        // Stringify objects for display
+                        row[field] = JSON.stringify(record[field]);
+                    }
+                });
+                
+                return row;
             });
             
-            return row;
-        });
+            this.noValidRecords = false;
+        } catch (error) {
+            console.error('Error updating displayed data:', error);
+            this.noValidRecords = true;
+            this.previewData = [];
+            this.columns = [];
+        }
     }
 
     /**
@@ -165,32 +201,49 @@ export default class DataPreview extends LightningElement {
         this.error = null;
         this.successMessage = null;
 
-        // Convert Map to object for Apex
-        const recordsObject = {};
-        this.objectMap.forEach((value, key) => {
-            recordsObject[key] = value;
-        });
-
-        insertRecords({ records: recordsObject })
-            .then(result => {
-                if (result.success) {
-                    let totalRecords = 0;
-                    Object.values(result.insertedRecordIds).forEach(ids => {
-                        totalRecords += ids.length;
-                    });
-                    
-                    this.successMessage = `Successfully inserted ${totalRecords} records`;
-                    this.showToast('Success', this.successMessage, 'success');
-                } else {
-                    this.error = 'Insert failed: ' + (result.errors ? result.errors.join(', ') : 'Unknown error');
-                    this.showToast('Error', this.error, 'error');
+        try {
+            // Convert Map to object for Apex
+            const recordsObject = {};
+            this.objectMap.forEach((value, key) => {
+                // Ensure the values are valid and can be serialized
+                if (value && Array.isArray(value) && value.length > 0) {
+                    recordsObject[key] = value;
                 }
-                this.isLoading = false;
-            })
-            .catch(error => {
-                this.handleError(error, 'Error inserting records');
-                this.isLoading = false;
             });
+
+            // Verify we have records to insert
+            if (Object.keys(recordsObject).length === 0) {
+                throw new Error('No valid records to insert');
+            }
+
+            insertRecords({ records: recordsObject })
+                .then(result => {
+                    if (result && result.success) {
+                        let totalRecords = 0;
+                        if (result.insertedRecordIds) {
+                            Object.values(result.insertedRecordIds).forEach(ids => {
+                                if (ids && Array.isArray(ids)) {
+                                    totalRecords += ids.length;
+                                }
+                            });
+                        }
+                        
+                        this.successMessage = `Successfully inserted ${totalRecords} records`;
+                        this.showToast('Success', this.successMessage, 'success');
+                    } else {
+                        this.error = 'Insert failed: ' + (result && result.errors ? result.errors.join(', ') : 'Unknown error');
+                        this.showToast('Error', this.error, 'error');
+                    }
+                    this.isLoading = false;
+                })
+                .catch(error => {
+                    this.handleError(error, 'Error inserting records');
+                    this.isLoading = false;
+                });
+        } catch (error) {
+            this.handleError(error, 'Error preparing records for insertion');
+            this.isLoading = false;
+        }
     }
 
     /**

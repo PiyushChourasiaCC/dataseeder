@@ -23,14 +23,19 @@ public with sharing class DataGenerationService {
      */
     @AuraEnabled
     public static Map<String, List<SObject>> generateData(String configJson) {
-        // Parse the configuration
-        Map<String, Object> config = parseConfiguration(configJson);
-        
-        // Validate the configuration
-        validateConfiguration(config);
-        
-        // Generate the data
-        return createSObjectRecords(config);
+        try {
+            // Parse the configuration
+            Map<String, Object> config = parseConfiguration(configJson);
+            
+            // Validate the configuration
+            validateConfiguration(config);
+            
+            // Generate the data
+            return createSObjectRecords(config);
+        } catch (Exception e) {
+            System.debug('Error in generateData: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw e;
+        }
     }
     
     /**
@@ -219,10 +224,57 @@ public with sharing class DataGenerationService {
      * @return Object Generated field value
      */
     private static Object generateFieldValue(String fieldType, Map<String, Object> fieldConfig, Map<String, Object> context) {
-        // In a real implementation, this would call the LLM API to generate contextually
-        // appropriate data based on field type, constraints, and context parameters
+        String fieldName = (String) fieldConfig.get('name');
         
-        // For now, generate some basic sample data based on type
+        // Special handling for common required fields
+        if (fieldName == 'Name') {
+            // Generate more realistic names based on context
+            String industry = context != null && context.containsKey('industry') 
+                ? (String)context.get('industry') : 'General';
+            String locale = context != null && context.containsKey('locale') 
+                ? (String)context.get('locale') : 'en_US';
+                
+            return generateNameByContext(industry, locale) + ' ' + Math.round(Math.random() * 1000);
+        }
+        
+        // For Phone fields, generate formatted phone numbers
+        if (fieldName == 'Phone') {
+            return '+' + (1 + Math.round(Math.random() * 98)) + ' ' + 
+                   Math.round(Math.random() * 999) + '-' + 
+                   Math.round(Math.random() * 999) + '-' + 
+                   Math.round(Math.random() * 9999);
+        }
+        
+        // For Industry field, use realistic values
+        if (fieldName == 'Industry') {
+            List<String> industries = new List<String>{
+                'Agriculture', 'Apparel', 'Banking', 'Biotechnology', 'Chemicals',
+                'Communications', 'Construction', 'Consulting', 'Education',
+                'Electronics', 'Energy', 'Engineering', 'Entertainment', 'Environmental',
+                'Finance', 'Food & Beverage', 'Government', 'Healthcare', 'Hospitality',
+                'Insurance', 'Machinery', 'Manufacturing', 'Media', 'Not For Profit',
+                'Recreation', 'Retail', 'Shipping', 'Technology', 'Telecommunications',
+                'Transportation', 'Utilities'
+            };
+            
+            // If context has a specific industry, prefer that one with 70% probability
+            if (context != null && context.containsKey('industry')) {
+                String contextIndustry = (String)context.get('industry');
+                // Clean up industry name to match picklist values
+                if (contextIndustry.contains('Financial') || contextIndustry.contains('Finance')) {
+                    contextIndustry = 'Finance';
+                }
+                
+                if (Math.random() < 0.7) {
+                    return contextIndustry;
+                }
+            }
+            
+            Integer index = Math.round(Math.random() * (industries.size() - 1));
+            return industries[index];
+        }
+        
+        // General field type handling
         if (fieldType == 'String') {
             Integer length = fieldConfig.containsKey('length') ? Integer.valueOf(fieldConfig.get('length')) : 50;
             return 'Sample' + Math.round(Math.random() * 1000);
@@ -245,6 +297,60 @@ public with sharing class DataGenerationService {
             return null;
         } else {
             return null;
+        }
+    }
+    
+    /**
+     * Generate contextually relevant name based on industry and locale
+     */
+    private static String generateNameByContext(String industry, String locale) {
+        // Default prefixes for company names
+        List<String> prefixes = new List<String>{
+            'Global', 'Advanced', 'Premium', 'Elite', 'Superior', 'Innovative', 
+            'United', 'Strategic', 'Dynamic', 'Precision', 'Reliable', 'Integrated'
+        };
+        
+        // Industry-specific suffixes
+        Map<String, List<String>> industrySuffixes = new Map<String, List<String>>{
+            'Financial Services' => new List<String>{'Bank', 'Financial', 'Capital', 'Investments', 'Wealth', 'Securities'},
+            'Technology' => new List<String>{'Tech', 'Systems', 'Software', 'Networks', 'Solutions', 'Digital'},
+            'Healthcare' => new List<String>{'Health', 'Medical', 'Care', 'Wellness', 'Therapeutic', 'Life Sciences'},
+            'Manufacturing' => new List<String>{'Manufacturing', 'Industries', 'Products', 'Materials', 'Fabrication'},
+            'Retail' => new List<String>{'Retail', 'Stores', 'Goods', 'Marketplace', 'Outlet', 'Emporium'},
+            'Energy' => new List<String>{'Energy', 'Power', 'Utilities', 'Resources', 'Renewable'}
+        };
+        
+        // Default suffixes if industry not found
+        List<String> defaultSuffixes = new List<String>{
+            'Corp', 'Inc', 'LLC', 'Group', 'Company', 'Enterprises', 'Partners', 'International'
+        };
+        
+        // Get a random prefix
+        Integer prefixIndex = Math.round(Math.random() * (prefixes.size() - 1));
+        String prefix = prefixes[prefixIndex];
+        
+        // Get industry-specific or default suffix
+        List<String> suffixes = industrySuffixes.containsKey(industry) ? 
+                               industrySuffixes.get(industry) : defaultSuffixes;
+        Integer suffixIndex = Math.round(Math.random() * (suffixes.size() - 1));
+        String suffix = suffixes[suffixIndex];
+        
+        // Locale-specific formatting
+        if (locale.startsWith('es')) {
+            // Spanish format
+            return prefix + ' ' + suffix + ' S.A.';
+        } else if (locale.startsWith('fr')) {
+            // French format
+            return prefix + ' ' + suffix + ' S.A.R.L.';
+        } else if (locale.startsWith('de')) {
+            // German format
+            return prefix + ' ' + suffix + ' GmbH';
+        } else if (locale.startsWith('it')) {
+            // Italian format
+            return prefix + ' ' + suffix + ' S.p.A.';
+        } else {
+            // Default format
+            return prefix + ' ' + suffix;
         }
     }
     
