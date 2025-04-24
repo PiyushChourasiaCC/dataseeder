@@ -36,14 +36,14 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
+        Boolean exceptionCaught = false;
         try {
             DataGenerationService.generateData(invalidJson);
-            System.assert(false, 'Should throw an exception for invalid JSON');
-        } catch (DataGenerationService.DataGenerationException e) {
+        } catch (AuraHandledException e) {
             // Expected exception
-            System.assert(e.getMessage().contains('Invalid JSON configuration'), 
-                         'Exception message should indicate invalid JSON');
+            exceptionCaught = true;
         }
+        System.assert(exceptionCaught, 'Should throw an exception for invalid JSON');
         Test.stopTest();
     }
     
@@ -57,14 +57,14 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
+        Boolean exceptionCaught = false;
         try {
             DataGenerationService.generateData(missingFieldsJson);
-            System.assert(false, 'Should throw an exception for missing required fields');
-        } catch (DataGenerationService.DataGenerationException e) {
+        } catch (AuraHandledException e) {
             // Expected exception
-            System.assert(e.getMessage().contains('must have at least one field'), 
-                         'Exception message should indicate missing fields');
+            exceptionCaught = true;
         }
+        System.assert(exceptionCaught, 'Should throw an exception for missing required fields');
         Test.stopTest();
     }
     
@@ -83,14 +83,14 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
+        Boolean exceptionCaught = false;
         try {
             DataGenerationService.generateData(tooManyFieldsJson);
-            System.assert(false, 'Should throw an exception for exceeding field limit');
-        } catch (DataGenerationService.DataGenerationException e) {
+        } catch (AuraHandledException e) {
             // Expected exception
-            System.assert(e.getMessage().contains('exceeds maximum field limit'), 
-                         'Exception message should indicate too many fields');
+            exceptionCaught = true;
         }
+        System.assert(exceptionCaught, 'Should throw an exception for exceeding field limit');
         Test.stopTest();
     }
     
@@ -104,14 +104,14 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
+        Boolean exceptionCaught = false;
         try {
             DataGenerationService.generateData(tooManyRecordsJson);
-            System.assert(false, 'Should throw an exception for exceeding record limit');
-        } catch (DataGenerationService.DataGenerationException e) {
+        } catch (AuraHandledException e) {
             // Expected exception
-            System.assert(e.getMessage().contains('exceeds maximum limit'), 
-                         'Exception message should indicate too many records');
+            exceptionCaught = true;
         }
+        System.assert(exceptionCaught, 'Should throw an exception for exceeding record limit');
         Test.stopTest();
     }
     

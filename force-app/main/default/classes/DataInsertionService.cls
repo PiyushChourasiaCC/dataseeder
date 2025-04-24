@@ -4,7 +4,7 @@
  * Responsible for inserting generated Salesforce data with proper transaction management and error handling.
  * Handles hierarchical insertions and rollbacks for data integrity.
  */
-public with sharing class DataInsertionService {
+public without sharing class DataInsertionService {
     
     // Maximum batch size for DML operations (to respect governor limits)
     private static final Integer MAX_BATCH_SIZE = 10;
@@ -28,6 +28,11 @@ public with sharing class DataInsertionService {
         Boolean success = true;
         
         try {
+            // Validate input
+            if (records == null || records.isEmpty()) {
+                throw new DataInsertionException('No records provided for insertion');
+            }
+            
             // Sort objects by dependency (parent objects first)
             List<String> insertOrder = determineInsertionOrder(records);
             
@@ -35,6 +40,25 @@ public with sharing class DataInsertionService {
             for (String objectName : insertOrder) {
                 if (records.containsKey(objectName)) {
                     List<SObject> objectRecords = records.get(objectName);
+                    
+                    // Skip if no records or empty list
+                    if (objectRecords == null || objectRecords.isEmpty()) {
+                        System.debug(LoggingLevel.INFO, 'No records to insert for object: ' + objectName);
+                        continue;
+                    }
+                    
+                    // Verify access to object
+                    Schema.DescribeSObjectResult objDescribe = 
+                        Schema.getGlobalDescribe().get(objectName).getDescribe();
+                    
+                    if (!objDescribe.isCreateable()) {
+                        String errorMessage = 'You do not have permission to create ' + objectName + ' records';
+                        errors.add(errorMessage);
+                        System.debug(LoggingLevel.ERROR, errorMessage);
+                        success = false;
+                        continue;
+                    }
+                    
                     List<Id> objectIds = new List<Id>();
                     
                     // Insert in batches to respect governor limits
@@ -78,7 +102,9 @@ public with sharing class DataInsertionService {
         } catch (Exception e) {
             // Handle unexpected exceptions
             success = false;
-            errors.add('Unexpected error: ' + e.getMessage() + ' - ' + e.getStackTraceString());
+            String errorMessage = 'Unexpected error: ' + e.getMessage() + ' - ' + e.getStackTraceString();
+            errors.add(errorMessage);
+            System.debug(LoggingLevel.ERROR, errorMessage);
             Database.rollback(sp);
             insertedRecordIds.clear();
         }
@@ -160,9 +186,9 @@ public with sharing class DataInsertionService {
      * Class to represent insertion results
      */
     public class DataInsertionResult {
-        public Boolean success;
-        public Map<String, List<Id>> insertedRecordIds;
-        public List<String> errors;
+        @AuraEnabled public Boolean success;
+        @AuraEnabled public Map<String, List<Id>> insertedRecordIds;
+        @AuraEnabled public List<String> errors;
         
         public DataInsertionResult() {
             success = true;
@@ -189,4 +215,9 @@ public with sharing class DataInsertionService {
             System.debug(LoggingLevel.ERROR, 'Error in async insertion: ' + e.getMessage() + ' - ' + e.getStackTraceString());
         }
     }
+    
+    /**
+     * Custom exception class for data insertion errors
+     */
+    public class DataInsertionException extends Exception {}
 } 

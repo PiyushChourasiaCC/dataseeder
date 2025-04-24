@@ -15,14 +15,39 @@ public with sharing class DataSeederUtility {
         Map<String, String> errorMap = new Map<String, String>();
         
         try {
+            // Check if objectName is valid
+            if (String.isBlank(objectName)) {
+                errorMap.put('SYSTEM_ERROR', 'Object name cannot be blank');
+                return errorMap;
+            }
+            
+            // Verify the object exists in schema
+            Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+            if (objectType == null) {
+                errorMap.put('SYSTEM_ERROR', 'Object does not exist: ' + objectName);
+                return errorMap;
+            }
+            
             // Get the SObject describe result
-            Schema.DescribeSObjectResult objDescribe = Schema.getGlobalDescribe().get(objectName).getDescribe();
+            Schema.DescribeSObjectResult objDescribe = objectType.getDescribe();
+            if (!objDescribe.isAccessible()) {
+                errorMap.put('SYSTEM_ERROR', 'You do not have access to object: ' + objectName);
+                return errorMap;
+            }
+            
             Map<String, Schema.SObjectField> fieldMap2 = objDescribe.fields.getMap();
             
             // Validate each field value against its type
             for (String fieldName : fieldMap.keySet()) {
                 if (fieldMap2.containsKey(fieldName)) {
                     Schema.DescribeFieldResult fieldDescribe = fieldMap2.get(fieldName).getDescribe();
+                    
+                    // Check field accessibility
+                    if (!fieldDescribe.isAccessible()) {
+                        errorMap.put(fieldName, 'You do not have access to this field');
+                        continue;
+                    }
+                    
                     Schema.DisplayType fieldType = fieldDescribe.getType();
                     Object fieldValue = fieldMap.get(fieldName);
                     
@@ -34,10 +59,14 @@ public with sharing class DataSeederUtility {
                     if (String.isNotBlank(error)) {
                         errorMap.put(fieldName, error);
                     }
+                } else {
+                    // Field doesn't exist on the object
+                    errorMap.put(fieldName, 'Field does not exist on ' + objectName);
                 }
             }
         } catch (Exception e) {
             errorMap.put('SYSTEM_ERROR', 'Error during validation: ' + e.getMessage());
+            System.debug(LoggingLevel.ERROR, 'Exception in validateFieldValues: ' + e.getMessage() + '\n' + e.getStackTraceString());
         }
         
         return errorMap;
@@ -127,21 +156,25 @@ public with sharing class DataSeederUtility {
             return formattedRecords;
         }
         
-        // Get all fields from the first record to ensure consistent display
-        Map<String, Object> firstRecord = records[0].getPopulatedFieldsAsMap();
-        Set<String> allFields = firstRecord.keySet();
-        
-        for (SObject record : records) {
-            Map<String, Object> recordMap = new Map<String, Object>();
-            Map<String, Object> populatedFields = record.getPopulatedFieldsAsMap();
+        try {
+            // Get all fields from the first record to ensure consistent display
+            Map<String, Object> firstRecord = records[0].getPopulatedFieldsAsMap();
+            Set<String> allFields = firstRecord.keySet();
             
-            // Add all fields from the standard set
-            for (String field : allFields) {
-                Object value = populatedFields.containsKey(field) ? populatedFields.get(field) : null;
-                recordMap.put(field, value);
+            for (SObject record : records) {
+                Map<String, Object> recordMap = new Map<String, Object>();
+                Map<String, Object> populatedFields = record.getPopulatedFieldsAsMap();
+                
+                // Add all fields from the standard set
+                for (String field : allFields) {
+                    Object value = populatedFields.containsKey(field) ? populatedFields.get(field) : null;
+                    recordMap.put(field, value);
+                }
+                
+                formattedRecords.add(recordMap);
             }
-            
-            formattedRecords.add(recordMap);
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Exception in formatRecordsForDisplay: ' + e.getMessage() + '\n' + e.getStackTraceString());
         }
         
         return formattedRecords;
@@ -156,9 +189,27 @@ public with sharing class DataSeederUtility {
     public static List<Map<String, Object>> sanitizeRecordsForInsertion(String objectName, List<Map<String, Object>> records) {
         List<Map<String, Object>> sanitizedRecords = new List<Map<String, Object>>();
         
+        if (String.isBlank(objectName) || records == null || records.isEmpty()) {
+            return sanitizedRecords;
+        }
+        
         try {
+            // Verify the object exists in schema
+            Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+            if (objectType == null) {
+                System.debug(LoggingLevel.ERROR, 'Object does not exist: ' + objectName);
+                return sanitizedRecords;
+            }
+            
+            // Check accessibility
+            Schema.DescribeSObjectResult objDescribe = objectType.getDescribe();
+            if (!objDescribe.isAccessible() || !objDescribe.isCreateable()) {
+                System.debug(LoggingLevel.ERROR, 'You do not have access to create ' + objectName);
+                return sanitizedRecords;
+            }
+            
             // Get fields for the object
-            Map<String, Schema.SObjectField> fieldMap = Schema.getGlobalDescribe().get(objectName).getDescribe().fields.getMap();
+            Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap();
             
             for (Map<String, Object> record : records) {
                 Map<String, Object> sanitizedRecord = new Map<String, Object>();
@@ -184,7 +235,7 @@ public with sharing class DataSeederUtility {
                 }
             }
         } catch (Exception e) {
-            System.debug('Error sanitizing records: ' + e.getMessage());
+            System.debug(LoggingLevel.ERROR, 'Error sanitizing records: ' + e.getMessage() + '\n' + e.getStackTraceString());
         }
         
         return sanitizedRecords;
@@ -236,7 +287,7 @@ public with sharing class DataSeederUtility {
                 }
             }
         } catch (Exception e) {
-            System.debug('Error converting value [' + value + '] to type ' + fieldType + ': ' + e.getMessage());
+            System.debug(LoggingLevel.ERROR, 'Error converting value [' + value + '] to type ' + fieldType + ': ' + e.getMessage());
             return null;
         }
         

@@ -4,7 +4,7 @@
  * Responsible for generating sample Salesforce data based on configuration.
  * Handles parsing JSON configuration, calling LLM API, and creating SObject records.
  */
-public with sharing class DataGenerationService {
+public without sharing class DataGenerationService {
     
     // Maximum number of fields allowed per object
     private static final Integer MAX_FIELDS_PER_OBJECT = 15;
@@ -24,6 +24,8 @@ public with sharing class DataGenerationService {
     @AuraEnabled
     public static Map<String, List<SObject>> generateData(String configJson) {
         try {
+            System.debug(LoggingLevel.INFO, 'Generating data with config: ' + configJson);
+            
             // Parse the configuration
             Map<String, Object> config = parseConfiguration(configJson);
             
@@ -31,10 +33,15 @@ public with sharing class DataGenerationService {
             validateConfiguration(config);
             
             // Generate the data
-            return createSObjectRecords(config);
+            Map<String, List<SObject>> result = createSObjectRecords(config);
+            
+            // Debug the result
+            System.debug(LoggingLevel.INFO, 'Generated data: ' + result);
+            
+            return result;
         } catch (Exception e) {
-            System.debug('Error in generateData: ' + e.getMessage() + '\n' + e.getStackTraceString());
-            throw e;
+            System.debug(LoggingLevel.ERROR, 'Error in generateData: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new AuraHandledException('Error generating data: ' + e.getMessage());
         }
     }
     
@@ -46,8 +53,13 @@ public with sharing class DataGenerationService {
      */
     private static Map<String, Object> parseConfiguration(String configJson) {
         try {
+            if (String.isBlank(configJson)) {
+                throw new DataGenerationException('Configuration JSON is empty or null');
+            }
+            
             return (Map<String, Object>) JSON.deserializeUntyped(configJson);
         } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error parsing JSON: ' + e.getMessage() + '\n' + e.getStackTraceString());
             throw new DataGenerationException('Invalid JSON configuration: ' + e.getMessage());
         }
     }
@@ -58,54 +70,61 @@ public with sharing class DataGenerationService {
      * @param config Parsed configuration map
      */
     private static void validateConfiguration(Map<String, Object> config) {
-        // Get the objects array
-        List<Object> objects = (List<Object>) config.get('objects');
-        
-        if (objects == null || objects.isEmpty()) {
-            throw new DataGenerationException('Configuration must include at least one object');
-        }
-        
-        Integer totalRecords = 0;
-        
-        // Validate each object
-        for (Object obj : objects) {
-            Map<String, Object> objectConfig = (Map<String, Object>) obj;
+        try {
+            // Get the objects array
+            List<Object> objects = (List<Object>) config.get('objects');
             
-            // Check if the object exists in Salesforce
-            String objectName = (String) objectConfig.get('name');
-            if (objectName == null || !validateSObjectExists(objectName)) {
-                throw new DataGenerationException('Invalid object name: ' + objectName);
+            if (objects == null || objects.isEmpty()) {
+                throw new DataGenerationException('Configuration must include at least one object');
             }
             
-            // Validate fields
-            List<Object> fields = (List<Object>) objectConfig.get('fields');
-            if (fields == null || fields.isEmpty()) {
-                throw new DataGenerationException('Object ' + objectName + ' must have at least one field');
-            }
+            Integer totalRecords = 0;
             
-            if (fields.size() > MAX_FIELDS_PER_OBJECT) {
-                throw new DataGenerationException('Object ' + objectName + ' exceeds maximum field limit of ' + MAX_FIELDS_PER_OBJECT);
-            }
-            
-            // Validate relationship depth
-            List<Object> relationships = (List<Object>) objectConfig.get('relationships');
-            if (relationships != null) {
-                for (Object rel : relationships) {
-                    Map<String, Object> relationship = (Map<String, Object>) rel;
-                    if (!validateRelationship(relationship)) {
-                        throw new DataGenerationException('Invalid relationship configuration');
+            // Validate each object
+            for (Object obj : objects) {
+                Map<String, Object> objectConfig = (Map<String, Object>) obj;
+                
+                // Check if the object exists in Salesforce
+                String objectName = (String) objectConfig.get('name');
+                if (objectName == null || !validateSObjectExists(objectName)) {
+                    throw new DataGenerationException('Invalid object name: ' + objectName);
+                }
+                
+                // Validate fields
+                List<Object> fields = (List<Object>) objectConfig.get('fields');
+                if (fields == null || fields.isEmpty()) {
+                    throw new DataGenerationException('Object ' + objectName + ' must have at least one field');
+                }
+                
+                if (fields.size() > MAX_FIELDS_PER_OBJECT) {
+                    throw new DataGenerationException('Object ' + objectName + ' exceeds maximum field limit of ' + MAX_FIELDS_PER_OBJECT);
+                }
+                
+                // Validate relationship depth
+                List<Object> relationships = (List<Object>) objectConfig.get('relationships');
+                if (relationships != null) {
+                    for (Object rel : relationships) {
+                        Map<String, Object> relationship = (Map<String, Object>) rel;
+                        if (!validateRelationship(relationship)) {
+                            throw new DataGenerationException('Invalid relationship configuration');
+                        }
                     }
                 }
+                
+                // Track total record count
+                Integer count = Integer.valueOf(objectConfig.get('count'));
+                totalRecords += count;
             }
             
-            // Track total record count
-            Integer count = Integer.valueOf(objectConfig.get('count'));
-            totalRecords += count;
-        }
-        
-        // Check total record limit
-        if (totalRecords > MAX_TOTAL_RECORDS) {
-            throw new DataGenerationException('Total record count exceeds maximum limit of ' + MAX_TOTAL_RECORDS);
+            // Check total record limit
+            if (totalRecords > MAX_TOTAL_RECORDS) {
+                throw new DataGenerationException('Total record count exceeds maximum limit of ' + MAX_TOTAL_RECORDS);
+            }
+        } catch (DataGenerationException e) {
+            throw e;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error validating configuration: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new DataGenerationException('Error validating configuration: ' + e.getMessage());
         }
     }
     
@@ -119,8 +138,21 @@ public with sharing class DataGenerationService {
         try {
             // Get the schema for the object
             Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
-            return objectType != null;
+            if (objectType == null) {
+                System.debug(LoggingLevel.ERROR, 'Object does not exist: ' + objectName);
+                return false;
+            }
+            
+            // Verify the user has access to the object
+            DescribeSObjectResult objDescribe = objectType.getDescribe();
+            if (!objDescribe.isAccessible()) {
+                System.debug(LoggingLevel.ERROR, 'Object is not accessible: ' + objectName);
+                return false;
+            }
+            
+            return true;
         } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error validating SObject existence: ' + e.getMessage() + '\n' + e.getStackTraceString());
             return false;
         }
     }
@@ -132,20 +164,37 @@ public with sharing class DataGenerationService {
      * @return Boolean True if the relationship is valid
      */
     private static Boolean validateRelationship(Map<String, Object> relationship) {
-        String childObject = (String) relationship.get('childObject');
-        String parentObject = (String) relationship.get('parentObject');
-        String field = (String) relationship.get('field');
-        
-        // Check that both objects exist
-        if (!validateSObjectExists(childObject) || !validateSObjectExists(parentObject)) {
+        try {
+            String childObject = (String) relationship.get('childObject');
+            String parentObject = (String) relationship.get('parentObject');
+            String field = (String) relationship.get('field');
+            
+            // Check that both objects exist
+            if (!validateSObjectExists(childObject) || !validateSObjectExists(parentObject)) {
+                return false;
+            }
+            
+            // Check that the field exists on the child object
+            Schema.SObjectType childType = Schema.getGlobalDescribe().get(childObject);
+            Map<String, Schema.SObjectField> childFields = childType.getDescribe().fields.getMap();
+            
+            if (!childFields.containsKey(field)) {
+                System.debug(LoggingLevel.ERROR, 'Field does not exist on child object: ' + field);
+                return false;
+            }
+            
+            // Check field accessibility
+            Schema.DescribeFieldResult fieldDescribe = childFields.get(field).getDescribe();
+            if (!fieldDescribe.isAccessible() || !fieldDescribe.isUpdateable()) {
+                System.debug(LoggingLevel.ERROR, 'Field is not accessible or updateable: ' + field);
+                return false;
+            }
+            
+            return true;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error validating relationship: ' + e.getMessage() + '\n' + e.getStackTraceString());
             return false;
         }
-        
-        // Check that the field exists on the child object
-        Schema.SObjectType childType = Schema.getGlobalDescribe().get(childObject);
-        Map<String, Schema.SObjectField> childFields = childType.getDescribe().fields.getMap();
-        
-        return childFields.containsKey(field);
     }
     
     /**
@@ -157,25 +206,36 @@ public with sharing class DataGenerationService {
     private static Map<String, List<SObject>> createSObjectRecords(Map<String, Object> config) {
         Map<String, List<SObject>> records = new Map<String, List<SObject>>();
         
-        // Get context parameters for LLM
-        Map<String, Object> context = (Map<String, Object>) config.get('context');
-        
-        // Process each object
-        List<Object> objects = (List<Object>) config.get('objects');
-        for (Object obj : objects) {
-            Map<String, Object> objectConfig = (Map<String, Object>) obj;
-            String objectName = (String) objectConfig.get('name');
-            Integer count = Integer.valueOf(objectConfig.get('count'));
+        try {
+            // Get context parameters for LLM
+            Map<String, Object> context = (Map<String, Object>) config.get('context');
             
-            // Generate records for this object
-            List<SObject> objectRecords = generateRecordsForObject(objectName, objectConfig, context, count);
-            records.put(objectName, objectRecords);
+            // Process each object
+            List<Object> objects = (List<Object>) config.get('objects');
+            for (Object obj : objects) {
+                Map<String, Object> objectConfig = (Map<String, Object>) obj;
+                String objectName = (String) objectConfig.get('name');
+                Integer count = Integer.valueOf(objectConfig.get('count'));
+                
+                // Generate records for this object
+                List<SObject> objectRecords = generateRecordsForObject(objectName, objectConfig, context, count);
+                
+                // Only add to the result if we have records
+                if (objectRecords != null && !objectRecords.isEmpty()) {
+                    records.put(objectName, objectRecords);
+                }
+            }
+            
+            // Process relationships after all records have been created
+            if (!records.isEmpty()) {
+                processRelationships(config, records);
+            }
+            
+            return records;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error creating SObject records: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new DataGenerationException('Error creating SObject records: ' + e.getMessage());
         }
-        
-        // Process relationships after all records have been created
-        processRelationships(config, records);
-        
-        return records;
     }
     
     /**
@@ -190,29 +250,61 @@ public with sharing class DataGenerationService {
     private static List<SObject> generateRecordsForObject(String objectName, Map<String, Object> objectConfig, 
                                                   Map<String, Object> context, Integer count) {
         List<SObject> records = new List<SObject>();
-        List<Object> fields = (List<Object>) objectConfig.get('fields');
         
-        // Create the specified number of records
-        for (Integer i = 0; i < count; i++) {
-            SObject record = Schema.getGlobalDescribe().get(objectName).newSObject();
+        try {
+            List<Object> fields = (List<Object>) objectConfig.get('fields');
             
-            // Generate data for each field
-            for (Object fieldObj : fields) {
-                Map<String, Object> fieldConfig = (Map<String, Object>) fieldObj;
-                String fieldName = (String) fieldConfig.get('name');
-                String fieldType = (String) fieldConfig.get('type');
-                
-                // Generate appropriate data based on field type
-                Object fieldValue = generateFieldValue(fieldType, fieldConfig, context);
-                if (fieldValue != null) {
-                    record.put(fieldName, fieldValue);
-                }
+            // Get SObject type
+            Schema.SObjectType sObjType = Schema.getGlobalDescribe().get(objectName);
+            if (sObjType == null) {
+                System.debug(LoggingLevel.ERROR, 'Object type not found: ' + objectName);
+                return records;
             }
             
-            records.add(record);
+            // Verify field accessibility
+            Map<String, Schema.SObjectField> fieldMap = sObjType.getDescribe().fields.getMap();
+            
+            // Create the specified number of records
+            for (Integer i = 0; i < count; i++) {
+                SObject record = sObjType.newSObject();
+                
+                // Generate data for each field
+                for (Object fieldObj : fields) {
+                    Map<String, Object> fieldConfig = (Map<String, Object>) fieldObj;
+                    String fieldName = (String) fieldConfig.get('name');
+                    String fieldType = (String) fieldConfig.get('type');
+                    
+                    // Check if field exists and is accessible
+                    if (!fieldMap.containsKey(fieldName)) {
+                        System.debug(LoggingLevel.ERROR, 'Field does not exist: ' + fieldName);
+                        continue;
+                    }
+                    
+                    Schema.DescribeFieldResult fieldDescribe = fieldMap.get(fieldName).getDescribe();
+                    if (!fieldDescribe.isAccessible() || !fieldDescribe.isUpdateable()) {
+                        System.debug(LoggingLevel.ERROR, 'Field is not accessible or updateable: ' + fieldName);
+                        continue;
+                    }
+                    
+                    // Generate appropriate data based on field type
+                    Object fieldValue = generateFieldValue(fieldType, fieldConfig, context);
+                    if (fieldValue != null) {
+                        try {
+                            record.put(fieldName, fieldValue);
+                        } catch (Exception e) {
+                            System.debug(LoggingLevel.ERROR, 'Error setting field value: ' + e.getMessage());
+                        }
+                    }
+                }
+                
+                records.add(record);
+            }
+            
+            return records;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error generating records for object: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            return new List<SObject>();
         }
-        
-        return records;
     }
     
     /**
