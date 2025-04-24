@@ -1,0 +1,76 @@
+<template>
+    <div class="slds-card">
+        <lightning-card title="Data Preview" icon-name="standard:data_model">
+            <div slot="actions">
+                <lightning-button label="Generate Preview" variant="brand" onclick={generatePreview}></lightning-button>
+                <lightning-button label="Insert Records" variant="success" onclick={handleInsert} disabled={isDataEmpty} class="slds-m-left_x-small"></lightning-button>
+            </div>
+            
+            <div class="slds-p-horizontal_small">
+                <!-- Object Selector -->
+                <template if:true={objectOptions.length}>
+                    <div class="slds-m-bottom_small">
+                        <lightning-combobox
+                            label="Select Object"
+                            placeholder="Choose an object to preview"
+                            value={displayedObject}
+                            options={objectOptions}
+                            onchange={handleObjectChange}>
+                        </lightning-combobox>
+                    </div>
+                </template>
+                
+                <!-- Success Message -->
+                <template if:true={successMessage}>
+                    <div class="slds-m-vertical_small">
+                        <div class="slds-notify slds-notify_alert slds-alert_success" role="alert">
+                            <span class="slds-assistive-text">Success</span>
+                            <lightning-icon icon-name="utility:success" size="small" variant="inverse" class="slds-m-right_x-small"></lightning-icon>
+                            <h2>{successMessage}</h2>
+                        </div>
+                    </div>
+                </template>
+                
+                <!-- Error Message -->
+                <template if:true={error}>
+                    <div class="slds-m-vertical_small">
+                        <div class="slds-notify slds-notify_alert slds-alert_error" role="alert">
+                            <span class="slds-assistive-text">Error</span>
+                            <lightning-icon icon-name="utility:error" size="small" variant="inverse" class="slds-m-right_x-small"></lightning-icon>
+                            <h2>{error}</h2>
+                        </div>
+                    </div>
+                </template>
+                
+                <!-- Data Table -->
+                <template if:true={previewData.length}>
+                    <div class="slds-border_top slds-m-top_small slds-p-top_small">
+                        <lightning-datatable
+                            key-field="key"
+                            data={previewData}
+                            columns={columns}
+                            hide-checkbox-column>
+                        </lightning-datatable>
+                    </div>
+                </template>
+                
+                <!-- Empty State -->
+                <template if:true={isDataEmpty}>
+                    <div class="slds-illustration slds-illustration_small" role="presentation">
+                        <div class="slds-text-longform">
+                            <h3 class="slds-text-heading_medium">No data to preview</h3>
+                            <p class="slds-text-body_regular">Click "Generate Preview" to see sample data based on your configuration.</p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            
+            <!-- Loading Spinner -->
+            <template if:true={isLoading}>
+                <div class="slds-is-relative slds-m-top_small">
+                    <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+                </div>
+            </template>
+        </lightning-card>
+    </div>
+</template> 

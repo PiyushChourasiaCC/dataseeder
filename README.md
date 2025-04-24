@@ -1,18 +1,59 @@
-# Salesforce DX Project: Next Steps
+# DataSeeder for Salesforce
 
-Now that you’ve created a Salesforce DX project, what’s next? Here are some documentation resources to get you started.
+DataSeeder is a powerful application for generating realistic test data directly within Salesforce.
 
-## How Do You Plan to Deploy Your Changes?
+## Features
 
-Do you want to deploy a set of changes, or create a self-contained application? Choose a [development model](https://developer.salesforce.com/tools/vscode/en/user-guide/development-models).
+- Create and manage data generation templates
+- Select Salesforce objects and fields for data generation
+- Configure contextual parameters like locale, industry, and region
+- Preview generated data before insertion
+- Insert data with proper transaction handling and relationship mapping
+- Import/export templates for sharing
 
-## Configure Your Salesforce DX Project
+## Components
 
-The `sfdx-project.json` file contains useful configuration information for your project. See [Salesforce DX Project Configuration](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_ws_config.htm) in the _Salesforce DX Developer Guide_ for details about this file.
+- **Apex Classes**: Backend services for data generation, insertion, and template management
+- **Custom Objects**: DataSeederTemplate__c to store template configurations
+- **Custom Metadata**: DataSeederConfig__mdt for application configuration
+- **Lightning Web Components**: Modern UI for configuring and generating data
+- **Permission Sets**: DataSeederAdmin and DataSeederUser for access control
 
-## Read All About It
+## Getting Started
 
-- [Salesforce Extensions Documentation](https://developer.salesforce.com/tools/vscode/)
-- [Salesforce CLI Setup Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_setup.meta/sfdx_setup/sfdx_setup_intro.htm)
-- [Salesforce DX Developer Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_intro.htm)
-- [Salesforce CLI Command Reference](https://developer.salesforce.com/docs/atlas.en-us.sfdx_cli_reference.meta/sfdx_cli_reference/cli_reference.htm)
+1. Deploy the application to your Salesforce org
+2. Assign the appropriate permission set to your users
+3. Configure your OpenAI API key in the LLM API Named Credential
+4. Navigate to the DataSeeder tab and start creating templates
+
+## Configuration
+
+The application can be configured via custom metadata:
+
+- `MaxTotalRecords`: Maximum number of total records (default: 50)
+- `MaxFieldsPerObject`: Maximum fields per object (default: 15)
+- `MaxBatchSize`: DML batch size for governor limits (default: 10)
+
+## Development
+
+This project is built using Salesforce DX. For local development:
+
+```sh
+git clone https://github.com/your-org/dataseeder.git
+cd dataseeder
+sfdx force:source:push -u your-org
+```
+
+## Testing
+
+All Apex classes have corresponding test classes with >75% code coverage.
+
+To run tests:
+
+```sh
+sfdx force:apex:test:run -u your-org
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

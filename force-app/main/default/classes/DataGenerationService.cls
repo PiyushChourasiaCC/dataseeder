@@ -1,0 +1,293 @@
+/**
+ * DataGenerationService
+ * 
+ * Responsible for generating sample Salesforce data based on configuration.
+ * Handles parsing JSON configuration, calling LLM API, and creating SObject records.
+ */
+public with sharing class DataGenerationService {
+    
+    // Maximum number of fields allowed per object
+    private static final Integer MAX_FIELDS_PER_OBJECT = 15;
+    
+    // Maximum relationship depth
+    private static final Integer MAX_RELATIONSHIP_DEPTH = 3;
+    
+    // Maximum total records to generate
+    private static final Integer MAX_TOTAL_RECORDS = 50;
+    
+    /**
+     * Generate SObject records based on the provided configuration
+     * 
+     * @param configJson JSON configuration for data generation
+     * @return Map<String, List<SObject>> Map of object API names to generated SObject records
+     */
+    @AuraEnabled
+    public static Map<String, List<SObject>> generateData(String configJson) {
+        // Parse the configuration
+        Map<String, Object> config = parseConfiguration(configJson);
+        
+        // Validate the configuration
+        validateConfiguration(config);
+        
+        // Generate the data
+        return createSObjectRecords(config);
+    }
+    
+    /**
+     * Parse the JSON configuration string into a map
+     * 
+     * @param configJson JSON configuration string
+     * @return Map<String, Object> Parsed configuration
+     */
+    private static Map<String, Object> parseConfiguration(String configJson) {
+        try {
+            return (Map<String, Object>) JSON.deserializeUntyped(configJson);
+        } catch (Exception e) {
+            throw new DataGenerationException('Invalid JSON configuration: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * Validate the configuration against Salesforce constraints
+     * 
+     * @param config Parsed configuration map
+     */
+    private static void validateConfiguration(Map<String, Object> config) {
+        // Get the objects array
+        List<Object> objects = (List<Object>) config.get('objects');
+        
+        if (objects == null || objects.isEmpty()) {
+            throw new DataGenerationException('Configuration must include at least one object');
+        }
+        
+        Integer totalRecords = 0;
+        
+        // Validate each object
+        for (Object obj : objects) {
+            Map<String, Object> objectConfig = (Map<String, Object>) obj;
+            
+            // Check if the object exists in Salesforce
+            String objectName = (String) objectConfig.get('name');
+            if (objectName == null || !validateSObjectExists(objectName)) {
+                throw new DataGenerationException('Invalid object name: ' + objectName);
+            }
+            
+            // Validate fields
+            List<Object> fields = (List<Object>) objectConfig.get('fields');
+            if (fields == null || fields.isEmpty()) {
+                throw new DataGenerationException('Object ' + objectName + ' must have at least one field');
+            }
+            
+            if (fields.size() > MAX_FIELDS_PER_OBJECT) {
+                throw new DataGenerationException('Object ' + objectName + ' exceeds maximum field limit of ' + MAX_FIELDS_PER_OBJECT);
+            }
+            
+            // Validate relationship depth
+            List<Object> relationships = (List<Object>) objectConfig.get('relationships');
+            if (relationships != null) {
+                for (Object rel : relationships) {
+                    Map<String, Object> relationship = (Map<String, Object>) rel;
+                    if (!validateRelationship(relationship)) {
+                        throw new DataGenerationException('Invalid relationship configuration');
+                    }
+                }
+            }
+            
+            // Track total record count
+            Integer count = Integer.valueOf(objectConfig.get('count'));
+            totalRecords += count;
+        }
+        
+        // Check total record limit
+        if (totalRecords > MAX_TOTAL_RECORDS) {
+            throw new DataGenerationException('Total record count exceeds maximum limit of ' + MAX_TOTAL_RECORDS);
+        }
+    }
+    
+    /**
+     * Validate that an SObject exists in the Salesforce org
+     * 
+     * @param objectName API name of the SObject
+     * @return Boolean True if the object exists
+     */
+    private static Boolean validateSObjectExists(String objectName) {
+        try {
+            // Get the schema for the object
+            Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+            return objectType != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
+     * Validate a relationship configuration
+     * 
+     * @param relationship Relationship configuration
+     * @return Boolean True if the relationship is valid
+     */
+    private static Boolean validateRelationship(Map<String, Object> relationship) {
+        String childObject = (String) relationship.get('childObject');
+        String parentObject = (String) relationship.get('parentObject');
+        String field = (String) relationship.get('field');
+        
+        // Check that both objects exist
+        if (!validateSObjectExists(childObject) || !validateSObjectExists(parentObject)) {
+            return false;
+        }
+        
+        // Check that the field exists on the child object
+        Schema.SObjectType childType = Schema.getGlobalDescribe().get(childObject);
+        Map<String, Schema.SObjectField> childFields = childType.getDescribe().fields.getMap();
+        
+        return childFields.containsKey(field);
+    }
+    
+    /**
+     * Create SObject records based on the configuration
+     * 
+     * @param config Parsed configuration
+     * @return Map<String, List<SObject>> Map of object API names to generated SObject records
+     */
+    private static Map<String, List<SObject>> createSObjectRecords(Map<String, Object> config) {
+        Map<String, List<SObject>> records = new Map<String, List<SObject>>();
+        
+        // Get context parameters for LLM
+        Map<String, Object> context = (Map<String, Object>) config.get('context');
+        
+        // Process each object
+        List<Object> objects = (List<Object>) config.get('objects');
+        for (Object obj : objects) {
+            Map<String, Object> objectConfig = (Map<String, Object>) obj;
+            String objectName = (String) objectConfig.get('name');
+            Integer count = Integer.valueOf(objectConfig.get('count'));
+            
+            // Generate records for this object
+            List<SObject> objectRecords = generateRecordsForObject(objectName, objectConfig, context, count);
+            records.put(objectName, objectRecords);
+        }
+        
+        // Process relationships after all records have been created
+        processRelationships(config, records);
+        
+        return records;
+    }
+    
+    /**
+     * Generate records for a specific object
+     * 
+     * @param objectName API name of the SObject
+     * @param objectConfig Configuration for this object
+     * @param context Context parameters for data generation
+     * @param count Number of records to generate
+     * @return List<SObject> Generated SObject records
+     */
+    private static List<SObject> generateRecordsForObject(String objectName, Map<String, Object> objectConfig, 
+                                                  Map<String, Object> context, Integer count) {
+        List<SObject> records = new List<SObject>();
+        List<Object> fields = (List<Object>) objectConfig.get('fields');
+        
+        // Create the specified number of records
+        for (Integer i = 0; i < count; i++) {
+            SObject record = Schema.getGlobalDescribe().get(objectName).newSObject();
+            
+            // Generate data for each field
+            for (Object fieldObj : fields) {
+                Map<String, Object> fieldConfig = (Map<String, Object>) fieldObj;
+                String fieldName = (String) fieldConfig.get('name');
+                String fieldType = (String) fieldConfig.get('type');
+                
+                // Generate appropriate data based on field type
+                Object fieldValue = generateFieldValue(fieldType, fieldConfig, context);
+                if (fieldValue != null) {
+                    record.put(fieldName, fieldValue);
+                }
+            }
+            
+            records.add(record);
+        }
+        
+        return records;
+    }
+    
+    /**
+     * Generate an appropriate value for a field based on its type
+     * 
+     * @param fieldType Salesforce field data type
+     * @param fieldConfig Field configuration
+     * @param context Context parameters for data generation
+     * @return Object Generated field value
+     */
+    private static Object generateFieldValue(String fieldType, Map<String, Object> fieldConfig, Map<String, Object> context) {
+        // In a real implementation, this would call the LLM API to generate contextually
+        // appropriate data based on field type, constraints, and context parameters
+        
+        // For now, generate some basic sample data based on type
+        if (fieldType == 'String') {
+            Integer length = fieldConfig.containsKey('length') ? Integer.valueOf(fieldConfig.get('length')) : 50;
+            return 'Sample' + Math.round(Math.random() * 1000);
+        } else if (fieldType == 'Number') {
+            Double minValue = fieldConfig.containsKey('minValue') ? Double.valueOf(fieldConfig.get('minValue')) : 0;
+            Double maxValue = fieldConfig.containsKey('maxValue') ? Double.valueOf(fieldConfig.get('maxValue')) : 100;
+            return Integer.valueOf(minValue + Math.random() * (maxValue - minValue));
+        } else if (fieldType == 'Boolean') {
+            return Math.random() > 0.5;
+        } else if (fieldType == 'Date') {
+            return Date.today().addDays(Integer.valueOf(Math.random() * 30));
+        } else if (fieldType == 'DateTime') {
+            return DateTime.now().addHours(Integer.valueOf(Math.random() * 24));
+        } else if (fieldType == 'Picklist') {
+            List<Object> picklistValues = (List<Object>) fieldConfig.get('picklistValues');
+            if (picklistValues != null && !picklistValues.isEmpty()) {
+                Integer index = Integer.valueOf(Math.random() * picklistValues.size());
+                return picklistValues[index];
+            }
+            return null;
+        } else {
+            return null;
+        }
+    }
+    
+    /**
+     * Process relationship configurations and link related records
+     * 
+     * @param config Complete configuration
+     * @param records Map of generated records
+     */
+    private static void processRelationships(Map<String, Object> config, Map<String, List<SObject>> records) {
+        List<Object> objects = (List<Object>) config.get('objects');
+        
+        for (Object obj : objects) {
+            Map<String, Object> objectConfig = (Map<String, Object>) obj;
+            List<Object> relationships = (List<Object>) objectConfig.get('relationships');
+            
+            if (relationships != null) {
+                for (Object rel : relationships) {
+                    Map<String, Object> relationship = (Map<String, Object>) rel;
+                    String childObject = (String) relationship.get('childObject');
+                    String parentObject = (String) relationship.get('parentObject');
+                    String field = (String) relationship.get('field');
+                    
+                    // Only process if we have both parent and child records
+                    if (records.containsKey(childObject) && records.containsKey(parentObject)) {
+                        List<SObject> childRecords = records.get(childObject);
+                        List<SObject> parentRecords = records.get(parentObject);
+                        
+                        // Link each child to a random parent
+                        for (SObject child : childRecords) {
+                            if (!parentRecords.isEmpty()) {
+                                Integer parentIndex = Integer.valueOf(Math.random() * parentRecords.size());
+                                child.put(field, parentRecords[parentIndex].Id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Custom exception class for data generation errors
+     */
+    public class DataGenerationException extends Exception {}
+} 

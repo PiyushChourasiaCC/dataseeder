@@ -1,0 +1,17 @@
+<template>
+    <div class="slds-grid slds-gutters">
+        <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+            <!-- Configuration Component -->
+            <c-seeder-configuration onconfigchange={handleConfigChange}></c-seeder-configuration>
+        </div>
+        <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+            <!-- Preview Component -->
+            <c-data-preview config-json={configJson}></c-data-preview>
+        </div>
+    </div>
+    
+    <!-- Button to generate preview from current configuration -->
+    <div class="slds-align_absolute-center slds-m-top_medium">
+        <lightning-button label="Generate Preview" variant="brand" onclick={handlePreviewClick} disabled={isConfigEmpty}></lightning-button>
+    </div>
+</template> 
