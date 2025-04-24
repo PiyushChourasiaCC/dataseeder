@@ -451,6 +451,8 @@ export default class SeederConfiguration extends LightningElement {
      * Generate configuration JSON from current settings
      */
     generateConfigJson() {
+        console.log('Context settings before JSON generation:', JSON.stringify(this.contextSettings));
+        
         const config = {
             version: '1.0',
             context: { ...this.contextSettings },
@@ -465,6 +467,7 @@ export default class SeederConfiguration extends LightningElement {
             });
         }
         
+        console.log('Generated config with context:', JSON.stringify(config.context));
         const configJson = JSON.stringify(config, null, 2);
         
         // Dispatch configuration change event

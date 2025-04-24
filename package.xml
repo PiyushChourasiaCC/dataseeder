@@ -7,6 +7,10 @@
         <members>DataInsertionServiceTest</members>
         <members>TemplateManagementService</members>
         <members>TemplateManagementServiceTest</members>
+        <members>DataSeederUtility</members>
+        <members>DataSeederUtilityTest</members>
+        <members>ContextSettingsService</members>
+        <members>ContextSettingsServiceTest</members>
         <name>ApexClass</name>
     </types>
     <types>
@@ -56,5 +60,5 @@
         <members>DataSeederUser</members>
         <name>PermissionSet</name>
     </types>
-    <version>58.0</version>
+    <version>60.0</version>
 </Package> 

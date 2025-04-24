@@ -427,22 +427,39 @@ public without sharing class DataGenerationService {
         Integer suffixIndex = Math.round(Math.random() * (suffixes.size() - 1));
         String suffix = suffixes[suffixIndex];
         
-        // Locale-specific formatting
-        if (locale.startsWith('es')) {
-            // Spanish format
-            return prefix + ' ' + suffix + ' S.A.';
-        } else if (locale.startsWith('fr')) {
-            // French format
-            return prefix + ' ' + suffix + ' S.A.R.L.';
-        } else if (locale.startsWith('de')) {
-            // German format
-            return prefix + ' ' + suffix + ' GmbH';
-        } else if (locale.startsWith('it')) {
-            // Italian format
-            return prefix + ' ' + suffix + ' S.p.A.';
+        // Create a context map for ContextSettingsService
+        Map<String, Object> context = new Map<String, Object>{
+            'locale' => locale,
+            'industry' => industry,
+            'region' => getRegionFromLocale(locale)
+        };
+        
+        String name = prefix + ' ' + suffix;
+        
+        // Use ContextSettingsService to format the name based on region
+        return ContextSettingsService.getRegionalFormat(name, 'companyName', context);
+    }
+    
+    /**
+     * Helper method to determine region from locale
+     */
+    private static String getRegionFromLocale(String locale) {
+        if (locale == null) {
+            return 'North America';
+        }
+        
+        if (locale.startsWith('en_US')) {
+            return 'North America';
+        } else if (locale.startsWith('en_GB') || locale.startsWith('fr') || locale.startsWith('de') || locale.startsWith('it') || locale.startsWith('es_ES')) {
+            return 'Europe';
+        } else if (locale.startsWith('ja') || locale.startsWith('zh') || locale.startsWith('ko')) {
+            return 'Asia Pacific';
+        } else if (locale.startsWith('es_MX') || locale.startsWith('pt_BR')) {
+            return 'Latin America';
+        } else if (locale.startsWith('ar') || locale.equals('de')) {
+            return 'MEA';
         } else {
-            // Default format
-            return prefix + ' ' + suffix;
+            return 'North America';
         }
     }
     
