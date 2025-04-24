@@ -266,6 +266,146 @@ public with sharing class TemplateManagementService {
     }
     
     /**
+     * Get all fields for a specified Salesforce object
+     * 
+     * @param objectName The API name of the Salesforce object
+     * @return List<Map<String, Object>> List of field information
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<Map<String, Object>> getObjectFields(String objectName) {
+        List<Map<String, Object>> fields = new List<Map<String, Object>>();
+        
+        try {
+            // Get the SObject type
+            Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+            if (objectType == null) {
+                throw new TemplateManagementException('Object not found: ' + objectName);
+            }
+            
+            // Get the describe result
+            Schema.DescribeSObjectResult objDescribe = objectType.getDescribe();
+            
+            // Check if the user has access to the object
+            if (!objDescribe.isAccessible()) {
+                throw new TemplateManagementException('You do not have access to object: ' + objectName);
+            }
+            
+            // Get field map
+            Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap();
+            
+            // Process each field
+            for (String fieldName : fieldMap.keySet()) {
+                Schema.DescribeFieldResult fieldDescribe = fieldMap.get(fieldName).getDescribe();
+                
+                // Skip fields the user can't see
+                if (!fieldDescribe.isAccessible()) {
+                    continue;
+                }
+                
+                // Get field data type
+                String fieldType = getFieldType(fieldDescribe);
+                
+                // Create field info map
+                Map<String, Object> fieldInfo = new Map<String, Object>{
+                    'name' => fieldName,
+                    'label' => fieldDescribe.getLabel(),
+                    'type' => fieldType,
+                    'required' => !fieldDescribe.isNillable() && !fieldDescribe.isDefaultedOnCreate(),
+                    'editable' => fieldDescribe.isUpdateable(),
+                    'attributes' => getFieldAttributes(fieldDescribe)
+                };
+                
+                fields.add(fieldInfo);
+            }
+            
+            return fields;
+        } catch (Exception e) {
+            throw new AuraHandledException('Error getting fields for ' + objectName + ': ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * Get field type from DescribeFieldResult
+     * 
+     * @param fieldDescribe The field describe result
+     * @return String The field type
+     */
+    private static String getFieldType(Schema.DescribeFieldResult fieldDescribe) {
+        Schema.DisplayType displayType = fieldDescribe.getType();
+        
+        switch on displayType {
+            when STRING, ID, TEXTAREA, URL, PHONE, EMAIL {
+                return 'String';
+            }
+            when INTEGER, LONG, DOUBLE, CURRENCY, PERCENT {
+                return 'Number';
+            }
+            when BOOLEAN {
+                return 'Boolean';
+            }
+            when DATE {
+                return 'Date';
+            }
+            when DATETIME {
+                return 'DateTime';
+            }
+            when PICKLIST, MULTIPICKLIST {
+                return 'Picklist';
+            }
+            when REFERENCE {
+                return 'Reference';
+            }
+            when else {
+                return 'String';
+            }
+        }
+    }
+    
+    /**
+     * Get additional field attributes
+     * 
+     * @param fieldDescribe The field describe result
+     * @return Map<String, Object> Map of field attributes
+     */
+    private static Map<String, Object> getFieldAttributes(Schema.DescribeFieldResult fieldDescribe) {
+        Map<String, Object> attributes = new Map<String, Object>();
+        
+        // Add picklistValues for picklist fields
+        if (fieldDescribe.getType() == Schema.DisplayType.PICKLIST || 
+            fieldDescribe.getType() == Schema.DisplayType.MULTIPICKLIST) {
+            List<Map<String, String>> picklistValues = new List<Map<String, String>>();
+            
+            for (Schema.PicklistEntry entry : fieldDescribe.getPicklistValues()) {
+                if (entry.isActive()) {
+                    picklistValues.add(new Map<String, String>{
+                        'label' => entry.getLabel(),
+                        'value' => entry.getValue()
+                    });
+                }
+            }
+            
+            attributes.put('picklistValues', picklistValues);
+        }
+        
+        // Add length for text fields
+        if (fieldDescribe.getType() == Schema.DisplayType.STRING || 
+            fieldDescribe.getType() == Schema.DisplayType.TEXTAREA) {
+            attributes.put('length', fieldDescribe.getLength());
+        }
+        
+        // Add reference info for lookup fields
+        if (fieldDescribe.getType() == Schema.DisplayType.REFERENCE) {
+            List<String> referenceTo = new List<String>();
+            for (Schema.SObjectType reference : fieldDescribe.getReferenceTo()) {
+                referenceTo.add(reference.getDescribe().getName());
+            }
+            attributes.put('referenceTo', referenceTo);
+        }
+        
+        return attributes;
+    }
+    
+    /**
      * Custom exception class for template management errors
      */
     public class TemplateManagementException extends Exception {}

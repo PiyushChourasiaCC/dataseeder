@@ -54,45 +54,123 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
-     * Process data returned from the Apex method
+     * Process the generated data for display
+     * 
+     * @param {Object} data The data returned from Apex
      */
-    processGeneratedData(result) {
+    processGeneratedData(data) {
         try {
-            this.isLoading = false;
-            this.error = null;
-            
-            // Clear any previous data
-            this.objectMap = new Map();
-            
-            if (!result || Object.keys(result).length === 0) {
-                this.error = 'No data was returned from the server. Please check your configuration.';
-                console.error('Data generation returned empty result:', result);
+            // Validate data
+            if (!data || !data.objects || !Array.isArray(data.objects)) {
+                this.showToast('Error', 'Invalid data format returned', 'error');
                 return;
             }
-            
-            // Process each object's records
-            for (const [objectName, records] of Object.entries(result)) {
-                if (records && records.length > 0) {
-                    this.objectMap.set(objectName, records);
+
+            // Clear existing data
+            this.previewData = [];
+            this.objectMap = {};
+            let hasValidData = false;
+
+            // Process each object type
+            data.objects.forEach(obj => {
+                if (!obj.name || !obj.records || !Array.isArray(obj.records)) {
+                    return; // Skip invalid object data
                 }
-            }
-            
-            // Create options for object selection
-            this.objectOptions = Array.from(this.objectMap.keys()).map(key => ({
-                label: key,
-                value: key
-            }));
-            
-            // Default to first object
-            if (this.objectOptions.length > 0) {
-                this.displayedObject = this.objectOptions[0].value;
-                this.updateDisplayedData();
+
+                const objectName = obj.name;
+                const recordCount = obj.records.length;
+                
+                if (recordCount === 0) {
+                    return; // Skip objects with no records
+                }
+
+                // Create columns based on the first record's fields
+                const columns = [];
+                const firstRecord = obj.records[0];
+                
+                // Debug information to identify issues
+                console.log('Processing object:', objectName);
+                console.log('First record:', JSON.stringify(firstRecord));
+
+                // Ensure we have a valid record with attributes
+                if (!firstRecord || typeof firstRecord !== 'object' || !firstRecord.attributes) {
+                    console.error('Invalid record structure for', objectName, firstRecord);
+                    return; // Skip this object if record structure is invalid
+                }
+
+                // Get all fields from the first record (excluding attributes)
+                const fields = Object.keys(firstRecord).filter(key => key !== 'attributes');
+                
+                // Create a column for each field
+                fields.forEach(fieldName => {
+                    // Skip internal/system fields
+                    if (fieldName.startsWith('_') || fieldName === 'attributes') {
+                        return;
+                    }
+                    
+                    const fieldValue = firstRecord[fieldName];
+                    const columnType = this.determineColumnType(fieldValue);
+                    
+                    columns.push({
+                        label: this.formatFieldLabel(fieldName),
+                        fieldName: fieldName,
+                        type: columnType,
+                        sortable: true,
+                        cellAttributes: { 
+                            alignment: columnType === 'number' || columnType === 'currency' ? 'right' : 'left' 
+                        }
+                    });
+                });
+
+                // Format records for datatable
+                const formattedRecords = obj.records.map(record => {
+                    // Skip invalid records
+                    if (!record || typeof record !== 'object' || !record.attributes) {
+                        console.warn('Skipping invalid record:', record);
+                        return null;
+                    }
+                    
+                    // Create a new record for datatable with a unique id
+                    const formattedRecord = { ...record };
+                    formattedRecord.id = this.generateId();
+                    formattedRecord.sobjectType = record.attributes.type;
+                    
+                    return formattedRecord;
+                }).filter(record => record !== null); // Remove null records
+
+                // Only add objects that have valid records
+                if (formattedRecords.length > 0) {
+                    hasValidData = true;
+                    
+                    // Add to object map for selection dropdown
+                    this.objectMap[objectName] = {
+                        label: this.formatFieldLabel(objectName),
+                        value: objectName,
+                        count: formattedRecords.length
+                    };
+                    
+                    // Add to preview data
+                    this.previewData.push({
+                        name: objectName,
+                        label: this.formatFieldLabel(objectName),
+                        records: formattedRecords,
+                        columns: columns,
+                        expanded: true
+                    });
+                }
+            });
+
+            // If we have valid data, set the first object as selected
+            if (hasValidData) {
+                const objectOptions = Object.values(this.objectMap);
+                this.objectOptions = objectOptions;
+                this.selectedObject = objectOptions[0].value;
             } else {
-                this.error = 'No valid SObject records were generated. Check that required fields have valid values.';
-                console.error('No valid SObjects in result:', result);
+                this.showToast('Warning', 'No valid records were generated', 'warning');
             }
         } catch (error) {
-            this.handleError(error);
+            console.error('Error processing data:', error);
+            this.showToast('Error', 'Error processing generated data: ' + error.message, 'error');
         }
     }
 
@@ -103,6 +181,7 @@ export default class DataPreview extends LightningElement {
         if (!this.displayedObject || !this.objectMap.has(this.displayedObject)) {
             this.previewData = [];
             this.columns = [];
+            this.noValidRecords = true;
             return;
         }
 
@@ -117,12 +196,7 @@ export default class DataPreview extends LightningElement {
             // Create columns based on first record
             const firstRecord = records[0];
             
-            // Check if we have a valid SObject record
-            if (!firstRecord || !firstRecord.attributes) {
-                this.noValidRecords = true;
-                return;
-            }
-            
+            // Get all field names except 'attributes' and 'Id'
             const fields = Object.keys(firstRecord).filter(field => 
                 field !== 'Id' && field !== 'attributes'
             );
@@ -133,14 +207,15 @@ export default class DataPreview extends LightningElement {
             }
 
             this.columns = fields.map(fieldName => ({
-                label: fieldName,
+                label: this.formatLabel(fieldName),
                 fieldName: fieldName,
                 type: this.determineColumnType(firstRecord[fieldName])
             }));
 
             // Create data array for lightning-datatable
             this.previewData = records.map((record, index) => {
-                const row = { ...record, key: index };
+                const row = {};
+                row.key = index;
                 
                 // Handle nested or special types for display
                 fields.forEach(field => {
@@ -149,13 +224,19 @@ export default class DataPreview extends LightningElement {
                     } else if (typeof record[field] === 'object') {
                         // Stringify objects for display
                         row[field] = JSON.stringify(record[field]);
+                    } else {
+                        row[field] = record[field];
                     }
                 });
                 
                 return row;
             });
             
-            this.noValidRecords = false;
+            // Clear errors if we have data
+            if (this.previewData.length > 0) {
+                this.noValidRecords = false;
+                this.error = null;
+            }
         } catch (error) {
             console.error('Error updating displayed data:', error);
             this.noValidRecords = true;
@@ -165,27 +246,21 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
-     * Determine the column type based on field value
+     * Format a field name as a nicer label
      */
-    determineColumnType(value) {
-        if (value === null || value === undefined) {
-            return 'text';
+    formatLabel(fieldName) {
+        // Special case for fields ending with __c (custom fields)
+        if (fieldName.endsWith('__c')) {
+            fieldName = fieldName.substring(0, fieldName.length - 3);
         }
-
-        const type = typeof value;
-        switch (type) {
-            case 'number':
-                return 'number';
-            case 'boolean':
-                return 'boolean';
-            case 'object':
-                if (value instanceof Date) {
-                    return 'date';
-                }
-                return 'text';
-            default:
-                return 'text';
-        }
+        
+        // Split by capital letters and underscores
+        const words = fieldName.split(/(?=[A-Z])/).join(' ').split('_').join(' ');
+        
+        // Capitalize first letter of each word
+        return words.split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
     }
 
     /**
@@ -275,5 +350,65 @@ export default class DataPreview extends LightningElement {
         const message = error.body?.message || error.message || fallbackMessage;
         this.showToast('Error', message, 'error');
         this.error = message;
+    }
+
+    /**
+     * Generate a unique ID for records
+     * @returns {string} A unique ID
+     */
+    generateId() {
+        return 'id_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    /**
+     * Format a field name into a readable label
+     * @param {string} fieldName The API name of the field
+     * @returns {string} A formatted label
+     */
+    formatFieldLabel(fieldName) {
+        if (!fieldName) return '';
+        // Handle relationship fields
+        if (fieldName.endsWith('__r')) {
+            fieldName = fieldName.replace('__r', '');
+        }
+        // Split by underscore and capitalize
+        return fieldName
+            .replace(/__c$/g, '')
+            .replace(/_/g, ' ')
+            .split(/(?=[A-Z])/).join(' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    /**
+     * Determine the column type based on the field value
+     * @param {*} value The field value
+     * @returns {string} The column type for lightning-datatable
+     */
+    determineColumnType(value) {
+        if (value === null || value === undefined) {
+            return 'text';
+        }
+        
+        const type = typeof value;
+        
+        switch (type) {
+            case 'number':
+                return Number.isInteger(value) ? 'number' : 'currency';
+            case 'boolean':
+                return 'boolean';
+            case 'object':
+                if (value instanceof Date) {
+                    return 'date';
+                }
+                return 'text';
+            default:
+                // Check if it looks like a date string
+                if (typeof value === 'string' && 
+                    (value.match(/^\d{4}-\d{2}-\d{2}$/) || 
+                     value.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/))) {
+                    return 'date';
+                }
+                return 'text';
+        }
     }
 } 

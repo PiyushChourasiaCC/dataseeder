@@ -15,6 +15,9 @@ public without sharing class DataGenerationService {
     // Maximum total records to generate
     private static final Integer MAX_TOTAL_RECORDS = 50;
     
+    // Use AI generation by default
+    private static final Boolean USE_AI_GENERATION = true;
+    
     /**
      * Generate SObject records based on the provided configuration
      * 
@@ -252,27 +255,41 @@ public without sharing class DataGenerationService {
         List<SObject> records = new List<SObject>();
         
         try {
-            List<Object> fields = (List<Object>) objectConfig.get('fields');
-            
-            // Get SObject type
+            // Validate SObject exists and is accessible
             Schema.SObjectType sObjType = Schema.getGlobalDescribe().get(objectName);
             if (sObjType == null) {
                 System.debug(LoggingLevel.ERROR, 'Object type not found: ' + objectName);
                 return records;
             }
             
-            // Verify field accessibility
-            Map<String, Schema.SObjectField> fieldMap = sObjType.getDescribe().fields.getMap();
+            DescribeSObjectResult objDescribe = sObjType.getDescribe();
+            if (!objDescribe.isAccessible()) {
+                System.debug(LoggingLevel.ERROR, 'Object is not accessible: ' + objectName);
+                return records;
+            }
+            
+            // Get field map for validation
+            Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap();
+            List<Object> fields = (List<Object>) objectConfig.get('fields');
             
             // Create the specified number of records
             for (Integer i = 0; i < count; i++) {
+                // Create a new SObject with explicitly set type attribute
                 SObject record = sObjType.newSObject();
+                
+                // Ensure the record has proper attributes for serialization
+                ensureRecordAttributes(record, objectName);
+                
+                Boolean hasPopulatedFields = false;
                 
                 // Generate data for each field
                 for (Object fieldObj : fields) {
                     Map<String, Object> fieldConfig = (Map<String, Object>) fieldObj;
                     String fieldName = (String) fieldConfig.get('name');
                     String fieldType = (String) fieldConfig.get('type');
+                    
+                    // Add object name to fieldConfig for LLM context
+                    fieldConfig.put('object', objectName);
                     
                     // Check if field exists and is accessible
                     if (!fieldMap.containsKey(fieldName)) {
@@ -291,19 +308,131 @@ public without sharing class DataGenerationService {
                     if (fieldValue != null) {
                         try {
                             record.put(fieldName, fieldValue);
+                            hasPopulatedFields = true;
                         } catch (Exception e) {
-                            System.debug(LoggingLevel.ERROR, 'Error setting field value: ' + e.getMessage());
+                            System.debug(LoggingLevel.ERROR, 'Error setting field value for ' + fieldName + ': ' + e.getMessage());
                         }
                     }
                 }
                 
-                records.add(record);
+                // Only add valid records with populated fields
+                if (hasPopulatedFields) {
+                    // Ensure attributes are correctly set before adding to the list
+                    records.add(record);
+                    System.debug(LoggingLevel.INFO, 'Added valid record for ' + objectName);
+                } else {
+                    System.debug(LoggingLevel.WARN, 'Skipped record with no populated fields for ' + objectName);
+                }
             }
             
+            // Final validation of records for LWC consumption
+            for (Integer i = records.size() - 1; i >= 0; i--) {
+                if (!ensureRecordAttributes(records[i], objectName)) {
+                    records.remove(i);
+                    System.debug(LoggingLevel.WARN, 'Removed invalid record at index ' + i);
+                }
+            }
+            
+            System.debug(LoggingLevel.INFO, 'Generated ' + records.size() + ' records for ' + objectName);
             return records;
         } catch (Exception e) {
-            System.debug(LoggingLevel.ERROR, 'Error generating records for object: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            System.debug(LoggingLevel.ERROR, 'Error generating records for object ' + objectName + ': ' + e.getMessage() + '\n' + e.getStackTraceString());
             return new List<SObject>();
+        }
+    }
+    
+    /**
+     * Ensures the SObject record has proper attributes required for JSON serialization
+     * and LWC consumption
+     * 
+     * @param record The SObject record to process
+     * @param objectName The API name of the SObject type
+     * @return Boolean True if the record attributes are valid
+     */
+    private static Boolean ensureRecordAttributes(SObject record, String objectName) {
+        if (record == null || String.isBlank(objectName)) {
+            return false;
+        }
+        
+        try {
+            // Use JSON serialization/deserialization to create a map with all fields and attributes
+            String jsonStr = JSON.serialize(record);
+            Map<String, Object> recordMap = (Map<String, Object>) JSON.deserializeUntyped(jsonStr);
+            
+            // Check for attributes map
+            Map<String, Object> attributesMap;
+            if (!recordMap.containsKey('attributes')) {
+                // Create new attributes map
+                attributesMap = new Map<String, Object>{'type' => objectName};
+                recordMap.put('attributes', attributesMap);
+            } else {
+                // Get existing attributes map
+                attributesMap = (Map<String, Object>) recordMap.get('attributes');
+                if (attributesMap == null) {
+                    attributesMap = new Map<String, Object>{'type' => objectName};
+                    recordMap.put('attributes', attributesMap);
+                } else if (!attributesMap.containsKey('type') || attributesMap.get('type') != objectName) {
+                    // Ensure type is correct
+                    attributesMap.put('type', objectName);
+                }
+            }
+            
+            // Convert back to SObject via JSON
+            // This is the key step to ensure proper serialization in LWC
+            String updatedJson = JSON.serialize(recordMap);
+            SObject updatedRecord = (SObject) JSON.deserialize(updatedJson, SObject.class);
+            
+            // Copy all fields from the updated record back to the original
+            Map<String, Object> fieldsMap = updatedRecord.getPopulatedFieldsAsMap();
+            for (String fieldName : fieldsMap.keySet()) {
+                if (fieldName != 'Id') { // Skip Id field
+                    record.put(fieldName, fieldsMap.get(fieldName));
+                }
+            }
+            
+            return true;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error ensuring record attributes: ' + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Validate that an SObject record is properly formed
+     * 
+     * @param record The SObject record to validate
+     * @param objectName The API name of the SObject type
+     * @return Boolean True if the record is valid
+     */
+    private static Boolean isValidRecord(SObject record, String objectName) {
+        if (record == null) {
+            return false;
+        }
+        
+        try {
+            // Check that the record has fields populated
+            Map<String, Object> fieldsMap = record.getPopulatedFieldsAsMap();
+            if (fieldsMap == null || fieldsMap.isEmpty()) {
+                return false;
+            }
+            
+            // Ensure attributes map exists and has the correct type
+            Map<String, Object> attributes = (Map<String, Object>)fieldsMap.get('attributes');
+            if (attributes == null || !attributes.containsKey('type')) {
+                // If attributes is missing or incomplete, try to add it
+                record.put('attributes', new Map<String, Object>{'type' => objectName});
+            } else if (attributes.get('type') != objectName) {
+                // If the type is wrong, fix it
+                attributes.put('type', objectName);
+            }
+            
+            // Verify JSON serializability - this catches many issues
+            String jsonString = JSON.serialize(record);
+            Map<String, Object> deserializedMap = (Map<String, Object>)JSON.deserializeUntyped(jsonString);
+            return deserializedMap != null && deserializedMap.containsKey('attributes');
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error validating record: ' + e.getMessage());
+            return false;
         }
     }
     
@@ -316,8 +445,69 @@ public without sharing class DataGenerationService {
      * @return Object Generated field value
      */
     private static Object generateFieldValue(String fieldType, Map<String, Object> fieldConfig, Map<String, Object> context) {
+        // Get field name for logging
         String fieldName = (String) fieldConfig.get('name');
+        String objectName = (String) fieldConfig.get('object');
         
+        Object fieldValue = null;
+        
+        // If AI generation is enabled, use LLMService
+        if (USE_AI_GENERATION) {
+            try {
+                if (String.isBlank(objectName)) {
+                    objectName = 'Generic';
+                }
+                
+                // Create a list with just this field configuration
+                List<Map<String, Object>> fields = new List<Map<String, Object>>{fieldConfig};
+                
+                // Call LLMService to generate a value for this field
+                Map<String, Object> generatedValues = LLMService.generateFieldValues(objectName, fields, context);
+                
+                // If we got a value back for this field, use it
+                if (generatedValues != null && generatedValues.containsKey(fieldName)) {
+                    fieldValue = generatedValues.get(fieldName);
+                    
+                    // Validate the value based on field type
+                    if (fieldValue != null) {
+                        if (fieldType == 'Number' && !(fieldValue instanceof Decimal) && !(fieldValue instanceof Integer)) {
+                            // Try to convert string to number if needed
+                            try {
+                                fieldValue = Decimal.valueOf(String.valueOf(fieldValue));
+                            } catch (Exception e) {
+                                fieldValue = null; // Will fall back to default generation
+                            }
+                        } else if (fieldType == 'Boolean' && !(fieldValue instanceof Boolean)) {
+                            // Try to convert string to boolean if needed
+                            String boolStr = String.valueOf(fieldValue).toLowerCase();
+                            if (boolStr == 'true') fieldValue = true;
+                            else if (boolStr == 'false') fieldValue = false;
+                            else fieldValue = null; // Will fall back to default generation
+                        } else if (fieldType == 'Date' && !(fieldValue instanceof Date)) {
+                            // Try to parse date string
+                            try {
+                                fieldValue = Date.valueOf(String.valueOf(fieldValue));
+                            } catch (Exception e) {
+                                fieldValue = null; // Will fall back to default generation
+                            }
+                        }
+                    }
+                    
+                    if (fieldValue != null) {
+                        System.debug(LoggingLevel.INFO, 'Successfully generated field value using LLM for ' + fieldName + ': ' + fieldValue);
+                        return fieldValue;
+                    }
+                }
+                
+                // If LLM generation failed or returned an invalid value, fall back to default generation
+                System.debug(LoggingLevel.INFO, 'LLM generation did not return a valid value for ' + fieldName + ', using fallback generation');
+            } catch (Exception e) {
+                System.debug(LoggingLevel.ERROR, 'Error using LLM to generate field value for ' + fieldName + ': ' + e.getMessage() + '\n' + e.getStackTraceString());
+                // Continue with fallback generation below
+            }
+        }
+        
+        // Fallback generation using the original logic
         // Special handling for common required fields
         if (fieldName == 'Name') {
             // Generate more realistic names based on context

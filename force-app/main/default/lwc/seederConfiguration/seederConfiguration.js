@@ -10,6 +10,7 @@ import createTemplate from '@salesforce/apex/TemplateManagementService.createTem
 import updateTemplate from '@salesforce/apex/TemplateManagementService.updateTemplate';
 import cloneTemplate from '@salesforce/apex/TemplateManagementService.cloneTemplate';
 import deleteTemplate from '@salesforce/apex/TemplateManagementService.deleteTemplate';
+import getObjectFields from '@salesforce/apex/TemplateManagementService.getObjectFields';
 
 export default class SeederConfiguration extends LightningElement {
     @track templates = [];
@@ -122,7 +123,12 @@ export default class SeederConfiguration extends LightningElement {
         this.isLoading = true;
         getAllActiveTemplates()
             .then(result => {
-                this.templates = result;
+                // Format templates for combobox
+                this.templates = result.map(template => ({
+                    label: template.Name,
+                    value: template.Id,
+                    description: template.Description__c
+                }));
                 this.isLoading = false;
             })
             .catch(error => {
@@ -352,29 +358,45 @@ export default class SeederConfiguration extends LightningElement {
     }
 
     /**
-     * Load available fields for selected object
+     * Load field options for the selected object
      */
     loadFieldOptions() {
-        // In a real implementation, this would call an Apex method to get fields for the selected object
-        // For now, using static field options based on the selected object
-        if (this.selectedObject === 'Account') {
-            this.fieldOptions = [
-                { label: 'Name', value: 'Name', type: 'String' },
-                { label: 'Phone', value: 'Phone', type: 'Phone' },
-                { label: 'Industry', value: 'Industry', type: 'Picklist' },
-                { label: 'Type', value: 'Type', type: 'Picklist' },
-                { label: 'Website', value: 'Website', type: 'URL' }
-            ];
-        } else if (this.selectedObject === 'Contact') {
-            this.fieldOptions = [
-                { label: 'First Name', value: 'FirstName', type: 'String' },
-                { label: 'Last Name', value: 'LastName', type: 'String' },
-                { label: 'Email', value: 'Email', type: 'Email' },
-                { label: 'Phone', value: 'Phone', type: 'Phone' },
-                { label: 'Title', value: 'Title', type: 'String' }
-            ];
-        } else {
-            this.fieldOptions = [];
+        this.isLoading = true;
+        this.fieldOptions = [];
+        
+        try {
+            // Get the SObject type
+            const objectType = this.selectedObject;
+            if (!objectType) {
+                throw new Error('No object selected');
+            }
+            
+            // Call Apex to get field info for this object
+            getObjectFields({ objectName: objectType })
+                .then(result => {
+                    // Map the field data to options format
+                    this.fieldOptions = result.map(field => ({
+                        label: field.label || field.name,
+                        value: field.name,
+                        type: field.type,
+                        attributes: field.attributes || {}
+                    }));
+                    
+                    // Remove any selected fields that no longer exist in the options
+                    const validFieldNames = new Set(this.fieldOptions.map(option => option.value));
+                    this.selectedFields = this.selectedFields.filter(field => 
+                        validFieldNames.has(field.name)
+                    );
+                    
+                    this.isLoading = false;
+                })
+                .catch(error => {
+                    this.handleError(error, 'Error loading fields');
+                    this.isLoading = false;
+                });
+        } catch (error) {
+            this.handleError(error, 'Error initializing field selection');
+            this.isLoading = false;
         }
     }
 
