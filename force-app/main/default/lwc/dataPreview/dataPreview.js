@@ -4,6 +4,7 @@ import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 // Apex methods
 import generateData from '@salesforce/apex/DataGenerationService.generateData';
 import insertRecords from '@salesforce/apex/DataInsertionService.insertRecords';
+import generateAndInsert from '@salesforce/apex/DataGenerationService.generateAndInsert';
 
 export default class DataPreview extends LightningElement {
     @api configJson;
@@ -54,15 +55,82 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
+     * Generate and directly insert records without preview
+     */
+    generateAndInsertDirectly() {
+        if (!this.configJson) {
+            this.showToast('Error', 'No configuration provided', 'error');
+            return;
+        }
+
+        this.isLoading = true;
+        this.error = null;
+        this.successMessage = null;
+        
+        // Call Apex method to generate and insert data in one operation
+        generateAndInsert({ configJson: this.configJson })
+            .then(result => {
+                if (result && result.success) {
+                    let totalRecords = 0;
+                    if (result.insertedRecordCounts) {
+                        Object.values(result.insertedRecordCounts).forEach(count => {
+                            if (typeof count === 'number') {
+                                totalRecords += count;
+                            }
+                        });
+                    }
+                    
+                    this.successMessage = `Successfully generated and inserted ${totalRecords} records`;
+                    this.showToast('Success', this.successMessage, 'success');
+                } else {
+                    this.error = 'Operation failed: ' + (result && result.errors ? result.errors.join(', ') : 'Unknown error');
+                    this.showToast('Error', this.error, 'error');
+                }
+                this.isLoading = false;
+            })
+            .catch(error => {
+                this.handleError(error, 'Error generating and inserting records');
+                this.isLoading = false;
+            });
+    }
+
+    /**
      * Process the generated data for display
      * 
      * @param {Object} data The data returned from Apex
      */
     processGeneratedData(data) {
         try {
+            console.log('Received data:', JSON.stringify(data));
+            
             // Validate data
-            if (!data || !data.objects || !Array.isArray(data.objects)) {
-                this.showToast('Error', 'Invalid data format returned', 'error');
+            if (!data) {
+                this.showToast('Error', 'No data returned from service', 'error');
+                return;
+            }
+            
+            // Handle different possible formats
+            if (!data.objects) {
+                // Try to convert legacy format if needed
+                if (typeof data === 'object' && Object.keys(data).length > 0) {
+                    const objectsList = [];
+                    Object.keys(data).forEach(key => {
+                        if (Array.isArray(data[key])) {
+                            objectsList.push({
+                                name: key,
+                                records: data[key]
+                            });
+                        }
+                    });
+                    data = { objects: objectsList };
+                } else {
+                    this.showToast('Error', 'Invalid data format returned', 'error');
+                    return;
+                }
+            }
+            
+            if (!Array.isArray(data.objects)) {
+                this.showToast('Error', 'Invalid data objects format', 'error');
                 return;
             }
 
@@ -74,6 +142,7 @@ export default class DataPreview extends LightningElement {
             // Process each object type
             data.objects.forEach(obj => {
                 if (!obj.name || !obj.records || !Array.isArray(obj.records)) {
+                    console.warn('Skipping invalid object data:', obj);
                     return; // Skip invalid object data
                 }
 
@@ -81,6 +150,7 @@ export default class DataPreview extends LightningElement {
                 const recordCount = obj.records.length;
                 
                 if (recordCount === 0) {
+                    console.warn('Skipping object with no records:', objectName);
                     return; // Skip objects with no records
                 }
 

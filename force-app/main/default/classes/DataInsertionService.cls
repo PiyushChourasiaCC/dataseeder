@@ -13,13 +13,12 @@ public without sharing class DataInsertionService {
     private static List<ErrorLog> errorLogs = new List<ErrorLog>();
     
     /**
-     * Insert records with transaction management
+     * Internal method for inserting records - can be called from other Apex classes
      * 
      * @param records Map of SObject API names to lists of records to insert
-     * @return DataInsertionResult Object containing insertion results and errors
+     * @return Map<String, Object> Result information with success, record IDs, and errors
      */
-    @AuraEnabled
-    public static DataInsertionResult insertRecords(Map<String, List<SObject>> records) {
+    public static Map<String, Object> insertRecordsInternal(Map<String, List<SObject>> records) {
         // Create a savepoint for rollback if needed
         Savepoint sp = Database.setSavepoint();
         
@@ -109,13 +108,33 @@ public without sharing class DataInsertionService {
             insertedRecordIds.clear();
         }
         
-        // Create and return result
-        DataInsertionResult result = new DataInsertionResult();
-        result.success = success;
-        result.insertedRecordIds = insertedRecordIds;
-        result.errors = errors;
+        // Create and return result as a map
+        Map<String, Object> result = new Map<String, Object>{
+            'success' => success,
+            'insertedRecordIds' => insertedRecordIds,
+            'errors' => errors
+        };
         
         return result;
+    }
+    
+    /**
+     * Insert records with transaction management
+     * 
+     * @param records Map of SObject API names to lists of records to insert
+     * @return DataInsertionResult Object containing insertion results and errors
+     */
+    @AuraEnabled
+    public static DataInsertionResult insertRecords(Map<String, List<SObject>> records) {
+        Map<String, Object> result = insertRecordsInternal(records);
+        
+        // Convert to DataInsertionResult type
+        DataInsertionResult insertionResult = new DataInsertionResult();
+        insertionResult.success = (Boolean)result.get('success');
+        insertionResult.insertedRecordIds = (Map<String, List<Id>>)result.get('insertedRecordIds');
+        insertionResult.errors = (List<String>)result.get('errors');
+        
+        return insertionResult;
     }
     
     /**

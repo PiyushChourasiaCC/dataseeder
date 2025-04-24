@@ -156,8 +156,10 @@ public without sharing class LLMService {
         req.setHeader('Content-Type', 'application/json');
         
         // Build system message with context
-        String systemMessage = 'You are a data generation assistant that creates realistic sample data for Salesforce. ' +
+        String systemMessage = 'You are a data generation assistant that creates realistic and highly diverse sample data for Salesforce. ' +
                               'You should respond with valid values in the requested format. ' +
+                              'IMPORTANT: Generate truly unique values for each field. Do not reuse values across multiple records. ' +
+                              'Be creative and varied in your data generation, especially for company names, addresses, and contact information. ' +
                               'Use the following context parameters for relevance: ' + JSON.serialize(context);
         
         // Build messages array
@@ -170,11 +172,11 @@ public without sharing class LLMService {
         Map<String, Object> requestBody = new Map<String, Object>{
             'model' => DEFAULT_MODEL,
             'messages' => messages,
-            'temperature' => 0.7,
+            'temperature' => 0.9, // Increased for more randomness
             'max_tokens' => 500,
             'top_p' => 1.0,
-            'frequency_penalty' => 0.0,
-            'presence_penalty' => 0.0
+            'frequency_penalty' => 0.5, // Added to reduce repetition
+            'presence_penalty' => 0.5 // Added to encourage new content
         };
         
         req.setBody(JSON.serialize(requestBody));
@@ -217,9 +219,13 @@ public without sharing class LLMService {
      * @return String The prompt for field value generation
      */
     private static String buildFieldValuesPrompt(String objectName, String fieldJson, String contextJson) {
+        // Add a random seed to ensure unique values each time
+        String randomSeed = String.valueOf(Datetime.now().getTime()) + '-' + Math.round(Math.random() * 10000);
+        
         return 'Generate realistic values for the following Salesforce ' + objectName + ' fields:\n\n' +
                'Fields: ' + fieldJson + '\n\n' +
                'Context: ' + contextJson + '\n\n' +
+               'Use this unique identifier to generate completely different values from previous calls: ' + randomSeed + '\n\n' +
                'Please respond with ONLY a JSON object where the keys are the field names and the values are appropriate ' +
                'for the field types, respecting any constraints and formatting requirements. ' +
                'Ensure values are appropriate for the industry, region, and locale provided in the context. ' +

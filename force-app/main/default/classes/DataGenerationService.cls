@@ -22,10 +22,10 @@ public without sharing class DataGenerationService {
      * Generate SObject records based on the provided configuration
      * 
      * @param configJson JSON configuration for data generation
-     * @return Map<String, List<SObject>> Map of object API names to generated SObject records
+     * @return Map<String, Object> Formatted data for LWC consumption
      */
     @AuraEnabled
-    public static Map<String, List<SObject>> generateData(String configJson) {
+    public static Map<String, Object> generateData(String configJson) {
         try {
             System.debug(LoggingLevel.INFO, 'Generating data with config: ' + configJson);
             
@@ -36,10 +36,29 @@ public without sharing class DataGenerationService {
             validateConfiguration(config);
             
             // Generate the data
-            Map<String, List<SObject>> result = createSObjectRecords(config);
+            Map<String, List<SObject>> recordsMap = createSObjectRecords(config);
+            
+            // Convert to format expected by LWC component
+            List<Map<String, Object>> objectsList = new List<Map<String, Object>>();
+            
+            for (String objectName : recordsMap.keySet()) {
+                List<SObject> records = recordsMap.get(objectName);
+                
+                if (records != null && !records.isEmpty()) {
+                    Map<String, Object> objectData = new Map<String, Object>{
+                        'name' => objectName,
+                        'records' => records
+                    };
+                    objectsList.add(objectData);
+                }
+            }
+            
+            Map<String, Object> result = new Map<String, Object>{
+                'objects' => objectsList
+            };
             
             // Debug the result
-            System.debug(LoggingLevel.INFO, 'Generated data: ' + result);
+            System.debug(LoggingLevel.INFO, 'Generated data objects: ' + objectsList.size());
             
             return result;
         } catch (Exception e) {
@@ -688,6 +707,56 @@ public without sharing class DataGenerationService {
                     }
                 }
             }
+        }
+    }
+    
+    /**
+     * Generate and insert SObject records in one operation
+     * 
+     * @param configJson JSON configuration for data generation
+     * @return Map<String, Object> Result information with success status and record counts
+     */
+    @AuraEnabled
+    public static Map<String, Object> generateAndInsert(String configJson) {
+        try {
+            System.debug(LoggingLevel.INFO, 'Generating and inserting data with config: ' + configJson);
+            
+            // Parse the configuration
+            Map<String, Object> config = parseConfiguration(configJson);
+            
+            // Validate the configuration
+            validateConfiguration(config);
+            
+            // Generate the data
+            Map<String, List<SObject>> recordsMap = createSObjectRecords(config);
+            
+            // Insert the records
+            Map<String, Object> insertResult = DataInsertionService.insertRecordsInternal(recordsMap);
+            
+            // Add additional information for the LWC component
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => (Boolean)insertResult.get('success'),
+                'insertedRecordCounts' => new Map<String, Integer>()
+            };
+            
+            // Count inserted records by object type
+            Map<String, List<Id>> insertedIds = (Map<String, List<Id>>)insertResult.get('insertedRecordIds');
+            if (insertedIds != null) {
+                for (String objectName : insertedIds.keySet()) {
+                    List<Id> ids = insertedIds.get(objectName);
+                    ((Map<String, Integer>)result.get('insertedRecordCounts')).put(objectName, ids.size());
+                }
+            }
+            
+            // Pass through any errors
+            if (insertResult.containsKey('errors')) {
+                result.put('errors', insertResult.get('errors'));
+            }
+            
+            return result;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error in generateAndInsert: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new AuraHandledException('Error generating and inserting data: ' + e.getMessage());
         }
     }
     
