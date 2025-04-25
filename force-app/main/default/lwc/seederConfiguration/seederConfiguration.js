@@ -151,7 +151,9 @@ export default class SeederConfiguration extends LightningElement {
                     label: field.label,
                     value: field.name,
                     type: field.type,
-                    required: field.required
+                    required: field.required,
+                    // Preserve all field attributes for later use
+                    attributes: field.attributes || {}
                 }));
                 
                 // Pre-select required fields
@@ -241,14 +243,25 @@ export default class SeederConfiguration extends LightningElement {
      * Process the field selection by updating the component state
      */
     processFieldSelection(selectedValues) {
-        // Update selected fields with type information
+        // Update selected fields with complete metadata
         this.selectedFields = selectedValues.map(fieldName => {
             const fieldOption = this.fieldOptions.find(option => option.value === fieldName);
-            return {
+            // Create a clone of the field metadata to include all attributes
+            const fieldMetadata = {
                 name: fieldName,
                 type: fieldOption.type,
-                required: fieldOption.required
+                required: fieldOption.required,
+                label: fieldOption.label
             };
+            
+            // Include all field attributes from the original field metadata
+            if (fieldOption.attributes) {
+                Object.keys(fieldOption.attributes).forEach(key => {
+                    fieldMetadata[key] = fieldOption.attributes[key];
+                });
+            }
+            
+            return fieldMetadata;
         });
         
         // Generate and dispatch configuration change
@@ -304,10 +317,46 @@ export default class SeederConfiguration extends LightningElement {
         };
         
         if (this.selectedObject) {
+            // Create object configuration with metadata
             const objectConfig = {
                 name: this.selectedObject,
                 count: this.recordCount,
-                fields: this.selectedFields
+                fields: this.selectedFields.map(field => {
+                    // Extract field metadata for LLM processing
+                    const fieldMetadata = {
+                        name: field.name,
+                        type: field.type,
+                        label: field.label,
+                        required: field.required
+                    };
+                    
+                    // Include all field attributes for validation and data generation
+                    if (field.attributes) {
+                        // Add important field constraints
+                        if (field.type === 'String' && field.attributes.length) {
+                            fieldMetadata.length = field.attributes.length;
+                        }
+                        
+                        if (field.type === 'Picklist' && field.attributes.picklistValues) {
+                            fieldMetadata.picklistValues = field.attributes.picklistValues;
+                        }
+                        
+                        if (field.type === 'Number' || field.type === 'Currency') {
+                            if (field.attributes.precision) fieldMetadata.precision = field.attributes.precision;
+                            if (field.attributes.scale) fieldMetadata.scale = field.attributes.scale;
+                            if (field.attributes.digits) fieldMetadata.digits = field.attributes.digits;
+                        }
+                        
+                        // Include other important validation attributes
+                        if (field.unique) fieldMetadata.unique = true;
+                        if (field.externalId) fieldMetadata.externalId = true;
+                        
+                        // Store all remaining attributes in a metadata object for LLM reference
+                        fieldMetadata.metadata = { ...field.attributes };
+                    }
+                    
+                    return fieldMetadata;
+                })
             };
             
             config.objects.push(objectConfig);

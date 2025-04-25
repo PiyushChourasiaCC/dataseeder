@@ -2,11 +2,13 @@
     <div class="slds-card">
         <lightning-card title="Data Management" icon-name="standard:data_model">
             <div slot="actions">
-                <lightning-button-group>
-                    <lightning-button label="Preview Data" variant="brand" onclick={generatePreview}></lightning-button>
-                    <lightning-button label="Insert Previewed Data" variant="success" onclick={handleInsert} disabled={isDataEmpty}></lightning-button>
-                    <lightning-button label="Generate & Insert Directly" variant="destructive" onclick={generateAndInsertDirectly}></lightning-button>
-                </lightning-button-group>
+                <template if:true={hasSelectedFields}>
+                    <lightning-button-group>
+                        <lightning-button label="Preview Data" variant="brand" onclick={generatePreview}></lightning-button>
+                        <lightning-button label="Insert Previewed Data" variant="success" onclick={handleInsert} disabled={isDataEmpty}></lightning-button>
+                        <lightning-button label="Generate & Insert Directly" variant="destructive" onclick={generateAndInsertDirectly}></lightning-button>
+                    </lightning-button-group>
+                </template>
             </div>
             
             <div class="slds-p-horizontal_small">

@@ -297,13 +297,16 @@ public with sharing class TemplateManagementService {
             for (String fieldName : fieldMap.keySet()) {
                 Schema.DescribeFieldResult fieldDescribe = fieldMap.get(fieldName).getDescribe();
                 
-                // Skip fields the user can't see
-                if (!fieldDescribe.isAccessible()) {
+                // Skip fields the user can't see or are immutable
+                if (!fieldDescribe.isAccessible() || fieldDescribe.isCalculated() || fieldDescribe.isAutoNumber()) {
                     continue;
                 }
                 
                 // Get field data type
                 String fieldType = getFieldType(fieldDescribe);
+                
+                // Get field attributes with all metadata
+                Map<String, Object> fieldAttributes = getFieldAttributes(fieldDescribe);
                 
                 // Create field info map
                 Map<String, Object> fieldInfo = new Map<String, Object>{
@@ -312,7 +315,10 @@ public with sharing class TemplateManagementService {
                     'type' => fieldType,
                     'required' => !fieldDescribe.isNillable() && !fieldDescribe.isDefaultedOnCreate(),
                     'editable' => fieldDescribe.isUpdateable(),
-                    'attributes' => getFieldAttributes(fieldDescribe)
+                    'createable' => fieldDescribe.isCreateable(),
+                    'externalId' => fieldDescribe.isExternalId(),
+                    'unique' => fieldDescribe.isUnique(),
+                    'attributes' => fieldAttributes
                 };
                 
                 fields.add(fieldInfo);
@@ -369,10 +375,27 @@ public with sharing class TemplateManagementService {
      */
     private static Map<String, Object> getFieldAttributes(Schema.DescribeFieldResult fieldDescribe) {
         Map<String, Object> attributes = new Map<String, Object>();
+        Schema.DisplayType fieldType = fieldDescribe.getType();
+        
+        // Common attributes for all fields
+        attributes.put('isNillable', fieldDescribe.isNillable());
+        attributes.put('isDefaultedOnCreate', fieldDescribe.isDefaultedOnCreate());
+        attributes.put('isCalculated', fieldDescribe.isCalculated());
+        attributes.put('isAutoNumber', fieldDescribe.isAutoNumber());
+        attributes.put('isCaseSensitive', fieldDescribe.isCaseSensitive());
+        attributes.put('isDeprecatedAndHidden', fieldDescribe.isDeprecatedAndHidden());
+        attributes.put('isFilterable', fieldDescribe.isFilterable());
+        attributes.put('isIdLookup', fieldDescribe.isIdLookup());
+        
+        // Add default value if it exists
+        Object defaultValue = fieldDescribe.getDefaultValue();
+        if (defaultValue != null) {
+            attributes.put('defaultValue', defaultValue);
+        }
         
         // Add picklistValues for picklist fields
-        if (fieldDescribe.getType() == Schema.DisplayType.PICKLIST || 
-            fieldDescribe.getType() == Schema.DisplayType.MULTIPICKLIST) {
+        if (fieldType == Schema.DisplayType.PICKLIST || 
+            fieldType == Schema.DisplayType.MULTIPICKLIST) {
             List<Map<String, String>> picklistValues = new List<Map<String, String>>();
             
             for (Schema.PicklistEntry entry : fieldDescribe.getPicklistValues()) {
@@ -387,19 +410,36 @@ public with sharing class TemplateManagementService {
             attributes.put('picklistValues', picklistValues);
         }
         
-        // Add length for text fields
-        if (fieldDescribe.getType() == Schema.DisplayType.STRING || 
-            fieldDescribe.getType() == Schema.DisplayType.TEXTAREA) {
+        // Add text-specific attributes
+        if (fieldType == Schema.DisplayType.STRING || 
+            fieldType == Schema.DisplayType.TEXTAREA) {
             attributes.put('length', fieldDescribe.getLength());
+            
+            // For text area fields
+            if (fieldType == Schema.DisplayType.TEXTAREA) {
+                attributes.put('isHtmlFormatted', fieldDescribe.isHtmlFormatted());
+            }
+        }
+        
+        // Add numeric-specific attributes
+        if (fieldType == Schema.DisplayType.INTEGER || 
+            fieldType == Schema.DisplayType.DOUBLE || 
+            fieldType == Schema.DisplayType.LONG || 
+            fieldType == Schema.DisplayType.CURRENCY || 
+            fieldType == Schema.DisplayType.PERCENT) {
+            attributes.put('precision', fieldDescribe.getPrecision());
+            attributes.put('scale', fieldDescribe.getScale());
+            attributes.put('digits', fieldDescribe.getDigits());
         }
         
         // Add reference info for lookup fields
-        if (fieldDescribe.getType() == Schema.DisplayType.REFERENCE) {
+        if (fieldType == Schema.DisplayType.REFERENCE) {
             List<String> referenceTo = new List<String>();
             for (Schema.SObjectType reference : fieldDescribe.getReferenceTo()) {
                 referenceTo.add(reference.getDescribe().getName());
             }
             attributes.put('referenceTo', referenceTo);
+            attributes.put('relationshipName', fieldDescribe.getRelationshipName());
         }
         
         return attributes;

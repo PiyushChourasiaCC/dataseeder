@@ -230,4 +230,114 @@ private class DataInsertionServiceTest {
         
         return records;
     }
+    
+    /**
+     * Test the new record sanitization functionality
+     */
+    @isTest
+    static void testRecordSanitization() {
+        // Create a map with records that have attributes
+        Map<String, List<SObject>> records = new Map<String, List<SObject>>();
+        
+        // Create an Account with attributes that might cause issues
+        Account acct = new Account(Name = 'Sanitization Test Account');
+        
+        // Add custom attributes through JSON serialization/deserialization
+        String jsonStr = JSON.serialize(acct);
+        Map<String, Object> acctMap = (Map<String, Object>)JSON.deserializeUntyped(jsonStr);
+        
+        // Modify attributes
+        Map<String, Object> attrs = new Map<String, Object>{
+            'type' => 'Account',
+            'custom' => 'This should be stripped'
+        };
+        acctMap.put('attributes', attrs);
+        
+        // Convert back to SObject
+        String modifiedJson = JSON.serialize(acctMap);
+        Account modifiedAcct = (Account)JSON.deserialize(modifiedJson, Account.class);
+        
+        records.put('Account', new List<SObject>{modifiedAcct});
+        
+        // Execute test
+        Test.startTest();
+        Map<String, Object> result = DataInsertionService.insertRecordsInternal(records);
+        Test.stopTest();
+        
+        // Verify results
+        System.assertEquals(true, result.get('success'), 'Sanitization should allow successful insertion');
+        
+        Map<String, List<Id>> insertedIds = (Map<String, List<Id>>)result.get('insertedRecordIds');
+        System.assert(insertedIds.containsKey('Account'), 'Should have inserted Account records');
+        System.assertEquals(1, insertedIds.get('Account').size(), 'Should have inserted 1 Account record');
+        
+        // Verify the record was inserted with correct data
+        List<Account> insertedAccounts = [SELECT Id, Name FROM Account WHERE Name = 'Sanitization Test Account'];
+        System.assertEquals(1, insertedAccounts.size(), 'Account should be inserted with correct name');
+    }
+    
+    /**
+     * Test automatic field validation
+     */
+    @isTest
+    static void testFieldValidation() {
+        // Create a Contact without required LastName
+        Contact invalidContact = new Contact();
+        
+        // But include a valid Account
+        Account validAccount = new Account(Name = 'Validation Test Account');
+        
+        Map<String, List<SObject>> records = new Map<String, List<SObject>>();
+        records.put('Contact', new List<SObject>{invalidContact});
+        records.put('Account', new List<SObject>{validAccount});
+        
+        // Execute test
+        Test.startTest();
+        Map<String, Object> result = DataInsertionService.insertRecordsInternal(records);
+        Test.stopTest();
+        
+        // Verify results
+        System.assertEquals(false, result.get('success'), 'Validation should fail with invalid Contact');
+        
+        List<String> errors = (List<String>)result.get('errors');
+        Boolean foundValidationError = false;
+        for (String error : errors) {
+            if (error.contains('LastName')) {
+                foundValidationError = true;
+                break;
+            }
+        }
+        System.assert(foundValidationError, 'Should have error about missing LastName');
+        
+        // Verify no records were inserted due to rollback
+        List<Account> accounts = [SELECT Id FROM Account WHERE Name = 'Validation Test Account'];
+        System.assertEquals(0, accounts.size(), 'No accounts should be inserted due to rollback');
+    }
+    
+    /**
+     * Test Account specific handling where Name is automatically provided
+     */
+    @isTest
+    static void testAccountNameHandling() {
+        // Create an Account without a Name
+        Account acct = new Account();
+        // Intentionally not setting Name
+        
+        Map<String, List<SObject>> records = new Map<String, List<SObject>>();
+        records.put('Account', new List<SObject>{acct});
+        
+        // Execute test
+        Test.startTest();
+        Map<String, Object> result = DataInsertionService.insertRecordsInternal(records);
+        Test.stopTest();
+        
+        // Verify results
+        System.assertEquals(true, result.get('success'), 'Account insertion should succeed with auto-generated Name');
+        
+        // Verify Account was created
+        List<Account> insertedAccounts = [SELECT Id, Name FROM Account];
+        System.assertEquals(1, insertedAccounts.size(), 'Account should be inserted');
+        System.assertNotEquals(null, insertedAccounts[0].Name, 'Account should have auto-generated Name');
+        System.assert(insertedAccounts[0].Name.startsWith('Account '), 'Account should have expected name pattern');
+    }
 } 

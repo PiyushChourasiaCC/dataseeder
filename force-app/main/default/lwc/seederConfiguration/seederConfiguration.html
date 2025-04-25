@@ -67,16 +67,19 @@
                             </template>
                         </div>
                         <div class="slds-col slds-size_1-of-4">
-                            <lightning-input 
-                                type="number" 
-                                label="Number of Records" 
-                                value={recordCount}
-                                min="1"
-                                max={MAX_TOTAL_RECORDS}
-                                message-when-range-overflow={rangeOverflowMessage}
-                                message-when-range-underflow="At least 1 record is required"
-                                onchange={handleRecordCountChange}>
-                            </lightning-input>
+                            <!-- Only show Number of Records when an object is selected -->
+                            <template if:true={selectedObject}>
+                                <lightning-input 
+                                    type="number" 
+                                    label="Number of Records" 
+                                    value={recordCount}
+                                    min="1"
+                                    max={MAX_TOTAL_RECORDS}
+                                    message-when-range-overflow={rangeOverflowMessage}
+                                    message-when-range-underflow="At least 1 record is required"
+                                    onchange={handleRecordCountChange}>
+                                </lightning-input>
+                            </template>
                         </div>
                     </div>
                     

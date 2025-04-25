@@ -32,6 +32,23 @@ public without sharing class DataInsertionService {
                 throw new DataInsertionException('No records provided for insertion');
             }
             
+            // Validate each record set before attempting insertion
+            Boolean hasAnyRecords = false;
+            for (String objectName : records.keySet()) {
+                List<SObject> objectRecords = records.get(objectName);
+                if (objectRecords != null && !objectRecords.isEmpty()) {
+                    hasAnyRecords = true;
+                    System.debug(LoggingLevel.INFO, 'Found ' + objectRecords.size() + ' records for ' + objectName);
+                    
+                    // Pre-validate records to ensure they have required fields
+                    validateRecordsBeforeInsertion(objectName, objectRecords, errors);
+                }
+            }
+            
+            if (!hasAnyRecords) {
+                throw new DataInsertionException('No valid records found in any object collections');
+            }
+            
             // Sort objects by dependency (parent objects first)
             List<String> insertOrder = determineInsertionOrder(records);
             
@@ -64,8 +81,22 @@ public without sharing class DataInsertionService {
                     for (Integer i = 0; i < objectRecords.size(); i += MAX_BATCH_SIZE) {
                         Integer endIndex = Math.min(i + MAX_BATCH_SIZE, objectRecords.size());
                         List<SObject> batch = new List<SObject>();
+                        
+                        // Create a clean batch without SObject attributes that might cause issues
                         for (Integer j = i; j < endIndex; j++) {
-                            batch.add(objectRecords[j]);
+                            SObject cleanRecord = sanitizeRecord(objectRecords[j], objectName);
+                            if (cleanRecord != null) {
+                                batch.add(cleanRecord);
+                            } else {
+                                String errorMessage = 'Invalid record at index ' + j + ' for object ' + objectName;
+                                errors.add(errorMessage);
+                                System.debug(LoggingLevel.ERROR, errorMessage);
+                            }
+                        }
+                        
+                        if (batch.isEmpty()) {
+                            System.debug(LoggingLevel.WARN, 'Empty batch for ' + objectName + ' after sanitization');
+                            continue;
                         }
                         
                         // Insert with partial success option to capture per-record errors
@@ -89,7 +120,17 @@ public without sharing class DataInsertionService {
                         }
                     }
                     
-                    insertedRecordIds.put(objectName, objectIds);
+                    if (!objectIds.isEmpty()) {
+                        insertedRecordIds.put(objectName, objectIds);
+                        System.debug(LoggingLevel.INFO, 'Successfully inserted ' + objectIds.size() + ' ' + objectName + ' records');
+                    } else {
+                        success = false;
+                        String errorMessage = 'Failed to insert any ' + objectName + ' records';
+                        if (!errors.contains(errorMessage)) {
+                            errors.add(errorMessage);
+                        }
+                        System.debug(LoggingLevel.ERROR, errorMessage);
+                    }
                 }
             }
             
@@ -97,6 +138,7 @@ public without sharing class DataInsertionService {
             if (!success) {
                 Database.rollback(sp);
                 insertedRecordIds.clear();
+                System.debug(LoggingLevel.INFO, 'Transaction rolled back due to errors');
             }
         } catch (Exception e) {
             // Handle unexpected exceptions
@@ -108,6 +150,12 @@ public without sharing class DataInsertionService {
             insertedRecordIds.clear();
         }
         
+        // If we get here with no errors but also no successful inserts, that's an error
+        if (success && insertedRecordIds.isEmpty()) {
+            success = false;
+            errors.add('No data was successfully inserted. Please check your input data and try again.');
+        }
+        
         // Create and return result as a map
         Map<String, Object> result = new Map<String, Object>{
             'success' => success,
@@ -116,6 +164,93 @@ public without sharing class DataInsertionService {
         };
         
         return result;
+    }
+    
+    /**
+     * Sanitize a record to ensure it's properly formatted for insertion
+     */
+    private static SObject sanitizeRecord(SObject record, String objectName) {
+        if (record == null) {
+            return null;
+        }
+        
+        try {
+            // Special handling for Account to ensure it works correctly
+            if (objectName == 'Account') {
+                Account acct = (Account)record;
+                // Ensure Account always has a Name value
+                if (String.isBlank(acct.Name)) {
+                    acct.Name = 'Account ' + Datetime.now().getTime();
+                }
+                return acct;
+            }
+            
+            // For other objects, create a clean copy without attributes that might cause issues
+            Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+            if (objectType == null) {
+                return null;
+            }
+            
+            SObject cleanRecord = objectType.newSObject();
+            Map<String, Object> fieldsMap = record.getPopulatedFieldsAsMap();
+            
+            // Copy all populated fields except 'attributes'
+            for (String fieldName : fieldsMap.keySet()) {
+                if (fieldName != 'attributes') {
+                    cleanRecord.put(fieldName, fieldsMap.get(fieldName));
+                }
+            }
+            
+            return cleanRecord;
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error sanitizing record: ' + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Validate records before attempting insertion
+     */
+    private static void validateRecordsBeforeInsertion(String objectName, List<SObject> records, List<String> errors) {
+        if (records == null || records.isEmpty()) {
+            errors.add('No records to validate for ' + objectName);
+            return;
+        }
+        
+        Schema.SObjectType objectType = Schema.getGlobalDescribe().get(objectName);
+        if (objectType == null) {
+            errors.add('Invalid object type: ' + objectName);
+            return;
+        }
+        
+        Schema.DescribeSObjectResult objDescribe = objectType.getDescribe();
+        Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap();
+        
+        // Get required fields
+        List<String> requiredFields = new List<String>();
+        for (String fieldName : fieldMap.keySet()) {
+            Schema.DescribeFieldResult fieldDescribe = fieldMap.get(fieldName).getDescribe();
+            if (!fieldDescribe.isNillable() && !fieldDescribe.isDefaultedOnCreate() && fieldDescribe.isCreateable()) {
+                requiredFields.add(fieldName);
+            }
+        }
+        
+        // Special handling for common objects
+        if (objectName == 'Account' && !requiredFields.contains('Name')) {
+            requiredFields.add('Name');
+        } else if (objectName == 'Contact' && !requiredFields.contains('LastName')) {
+            requiredFields.add('LastName');
+        }
+        
+        for (Integer i = 0; i < records.size(); i++) {
+            SObject record = records[i];
+            for (String requiredField : requiredFields) {
+                if (record.get(requiredField) == null) {
+                    errors.add('Record ' + i + ' of type ' + objectName + 
+                              ' is missing required field: ' + requiredField);
+                }
+            }
+        }
     }
     
     /**

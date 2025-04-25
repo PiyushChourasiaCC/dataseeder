@@ -276,4 +276,75 @@ public class TemplateManagementServiceTest {
         }
         System.assert(hasAccount, 'Account should be in the list of creatable objects');
     }
+    
+    /**
+     * Test getObjectFields method and field attributes
+     */
+    @isTest
+    static void testGetObjectFields() {
+        // Execute test
+        Test.startTest();
+        List<Map<String, Object>> fields = TemplateManagementService.getObjectFields('Account');
+        Test.stopTest();
+        
+        // Verify basic field list structure
+        System.assertNotEquals(null, fields, 'Fields should not be null');
+        System.assert(!fields.isEmpty(), 'Fields list should not be empty');
+        
+        // Find the Name field
+        Map<String, Object> nameField = null;
+        for(Map<String, Object> field : fields) {
+            if(field.get('name') == 'Name') {
+                nameField = field;
+                break;
+            }
+        }
+        
+        // Verify Name field was found and has correct structure
+        System.assertNotEquals(null, nameField, 'Should include the Name field');
+        System.assert(nameField.containsKey('label'), 'Should include label attribute');
+        System.assert(nameField.containsKey('type'), 'Should include type attribute');
+        System.assert(nameField.containsKey('required'), 'Should include required attribute');
+        System.assert(nameField.containsKey('attributes'), 'Should include attributes map');
+        
+        // Check attributes map
+        Map<String, Object> attributes = (Map<String, Object>)nameField.get('attributes');
+        System.assertNotEquals(null, attributes, 'Attributes should not be null');
+        System.assert(attributes.containsKey('isNillable'), 'Should include isNillable attribute');
+        System.assert(attributes.containsKey('isDefaultedOnCreate'), 'Should include isDefaultedOnCreate attribute');
+        System.assert(attributes.containsKey('length'), 'Should include length attribute for string field');
+        
+        // Find a picklist field (Industry)
+        Map<String, Object> picklistField = null;
+        for(Map<String, Object> field : fields) {
+            if(field.get('name') == 'Industry') {
+                picklistField = field;
+                break;
+            }
+        }
+        
+        // Verify picklist field attributes
+        if(picklistField != null) {
+            Map<String, Object> picklistAttributes = (Map<String, Object>)picklistField.get('attributes');
+            System.assert(picklistAttributes.containsKey('picklistValues'), 'Picklist field should include picklistValues');
+            List<Object> picklistValues = (List<Object>)picklistAttributes.get('picklistValues');
+            System.assert(!picklistValues.isEmpty(), 'Picklist values should not be empty');
+        }
+        
+        // Find a numeric field (AnnualRevenue)
+        Map<String, Object> numericField = null;
+        for(Map<String, Object> field : fields) {
+            if(field.get('name') == 'AnnualRevenue') {
+                numericField = field;
+                break;
+            }
+        }
+        
+        // Verify numeric field attributes
+        if(numericField != null) {
+            Map<String, Object> numericAttributes = (Map<String, Object>)numericField.get('attributes');
+            System.assert(numericAttributes.containsKey('precision'), 'Numeric field should include precision');
+            System.assert(numericAttributes.containsKey('scale'), 'Numeric field should include scale');
+        }
+    }
 } 
