@@ -35,6 +35,9 @@ public without sharing class DataGenerationService {
             // Validate the configuration
             validateConfiguration(config);
             
+            // Ensure context information is correctly preserved
+            ensureContextSettings(config);
+            
             // Generate the data
             Map<String, List<SObject>> recordsMap = createSObjectRecords(config);
             
@@ -56,6 +59,11 @@ public without sharing class DataGenerationService {
             Map<String, Object> result = new Map<String, Object>{
                 'objects' => objectsList
             };
+            
+            // Include the context in the result for reference
+            if (config.containsKey('context')) {
+                result.put('context', config.get('context'));
+            }
             
             // Debug the result
             System.debug(LoggingLevel.INFO, 'Generated data objects: ' + objectsList.size());
@@ -711,6 +719,50 @@ public without sharing class DataGenerationService {
     }
     
     /**
+     * Ensure context settings like locale are properly set and preserved
+     * 
+     * @param config The configuration map
+     */
+    private static void ensureContextSettings(Map<String, Object> config) {
+        // Initialize context if not present
+        if (!config.containsKey('context')) {
+            config.put('context', new Map<String, Object>());
+        }
+        
+        Map<String, Object> context = (Map<String, Object>)config.get('context');
+        
+        // Ensure locale is set and normalized
+        if (context.containsKey('locale')) {
+            String locale = (String)context.get('locale');
+            if (String.isNotBlank(locale)) {
+                // Normalize locale format
+                if (locale.equalsIgnoreCase('Spanish') || locale.equalsIgnoreCase('es')) {
+                    context.put('locale', 'es_ES');
+                } else if (locale.equalsIgnoreCase('French') || locale.equalsIgnoreCase('fr')) {
+                    context.put('locale', 'fr_FR');
+                } else if (locale.equalsIgnoreCase('German') || locale.equalsIgnoreCase('de')) {
+                    context.put('locale', 'de_DE');
+                } else if (locale.equalsIgnoreCase('English') || locale.equalsIgnoreCase('en')) {
+                    context.put('locale', 'en_US');
+                }
+                // Add more locale mappings as needed
+            }
+        } else {
+            // Default to English if not specified
+            context.put('locale', 'en_US');
+        }
+        
+        // Ensure region is set based on locale if not already specified
+        if (!context.containsKey('region') && context.containsKey('locale')) {
+            String locale = (String)context.get('locale');
+            context.put('region', getRegionFromLocale(locale));
+        }
+        
+        // Log context for debugging
+        System.debug(LoggingLevel.INFO, 'Using context settings: ' + JSON.serialize(context));
+    }
+    
+    /**
      * Generate and insert SObject records in one operation
      * 
      * @param configJson JSON configuration for data generation
@@ -726,6 +778,9 @@ public without sharing class DataGenerationService {
             
             // Validate the configuration
             validateConfiguration(config);
+            
+            // Ensure context information is correctly preserved
+            ensureContextSettings(config);
             
             // Generate the data
             Map<String, List<SObject>> recordsMap = createSObjectRecords(config);
@@ -751,6 +806,11 @@ public without sharing class DataGenerationService {
             // Pass through any errors
             if (insertResult.containsKey('errors')) {
                 result.put('errors', insertResult.get('errors'));
+            }
+            
+            // Include the context in the result for reference
+            if (config.containsKey('context')) {
+                result.put('context', config.get('context'));
             }
             
             return result;

@@ -65,11 +65,19 @@
                 <!-- Data Table -->
                 <template if:true={previewData.length}>
                     <div class="slds-border_top slds-m-top_small slds-p-top_small">
+                        <div class="slds-m-bottom_small">
+                            <div class="slds-text-heading_small slds-p-bottom_x-small">
+                                <span class="slds-text-title_caps">Previewing:</span> 
+                                {displayedObject} - {previewData.length} Records
+                            </div>
+                        </div>
                         <lightning-datatable
                             key-field="key"
                             data={previewData}
                             columns={columns}
-                            hide-checkbox-column>
+                            hide-checkbox-column
+                            resize-column-disabled="false"
+                            min-column-width="120">
                         </lightning-datatable>
                     </div>
                 </template>

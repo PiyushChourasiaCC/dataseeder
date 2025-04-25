@@ -40,7 +40,7 @@ export default class DataPreview extends LightningElement {
         this.successMessage = null;
         this.previewData = [];
         this.columns = [];
-        this.objectMap.clear();
+        this.objectMap = new Map();
         this.noValidRecords = false;
         
         generateData({ configJson: this.configJson })
@@ -106,6 +106,7 @@ export default class DataPreview extends LightningElement {
             // Validate data
             if (!data) {
                 this.showToast('Error', 'No data returned from service', 'error');
+                this.isLoading = false;
                 return;
             }
             
@@ -125,12 +126,14 @@ export default class DataPreview extends LightningElement {
                     data = { objects: objectsList };
                 } else {
                     this.showToast('Error', 'Invalid data format returned', 'error');
+                    this.isLoading = false;
                     return;
                 }
             }
             
             if (!Array.isArray(data.objects)) {
                 this.showToast('Error', 'Invalid data objects format', 'error');
+                this.isLoading = false;
                 return;
             }
 
@@ -201,9 +204,17 @@ export default class DataPreview extends LightningElement {
                     }
                     
                     // Create a new record for datatable with a unique id
-                    const formattedRecord = { ...record };
+                    const formattedRecord = {};
                     formattedRecord.id = this.generateId();
+                    formattedRecord.key = formattedRecord.id; // Add key for datatable
                     formattedRecord.sobjectType = record.attributes.type;
+                    
+                    // Copy all fields excluding attributes
+                    Object.keys(record).forEach(field => {
+                        if (field !== 'attributes') {
+                            formattedRecord[field] = record[field];
+                        }
+                    });
                     
                     return formattedRecord;
                 }).filter(record => record !== null); // Remove null records
@@ -212,35 +223,52 @@ export default class DataPreview extends LightningElement {
                 if (formattedRecords.length > 0) {
                     hasValidData = true;
                     
+                    // Store raw records for insertion
+                    const rawRecords = [...obj.records];
+                    
                     // Add to object map for selection dropdown
                     this.objectMap[objectName] = {
                         label: this.formatFieldLabel(objectName),
                         value: objectName,
-                        count: formattedRecords.length
+                        count: formattedRecords.length,
+                        records: rawRecords
                     };
                     
-                    // Add to preview data
-                    this.previewData.push({
-                        name: objectName,
-                        label: this.formatFieldLabel(objectName),
-                        records: formattedRecords,
-                        columns: columns,
-                        expanded: true
-                    });
+                    // Set the displayed data for this object
+                    this.columns = columns;
+                    this.previewData = formattedRecords;
+                    this.displayedObject = objectName;
                 }
             });
 
-            // If we have valid data, set the first object as selected
+            // If we have valid data, create object options and select the first one
             if (hasValidData) {
-                const objectOptions = Object.values(this.objectMap);
+                const objectOptions = [];
+                
+                Object.keys(this.objectMap).forEach(key => {
+                    objectOptions.push({
+                        label: `${this.objectMap[key].label} (${this.objectMap[key].count})`,
+                        value: key
+                    });
+                });
+                
                 this.objectOptions = objectOptions;
-                this.selectedObject = objectOptions[0].value;
+                
+                if (!this.displayedObject && objectOptions.length > 0) {
+                    this.displayedObject = objectOptions[0].value;
+                    this.updateDisplayedData();
+                }
             } else {
                 this.showToast('Warning', 'No valid records were generated', 'warning');
+                this.noValidRecords = true;
             }
+            
+            this.isLoading = false;
         } catch (error) {
             console.error('Error processing data:', error);
             this.showToast('Error', 'Error processing generated data: ' + error.message, 'error');
+            this.isLoading = false;
+            this.noValidRecords = true;
         }
     }
 
@@ -248,54 +276,69 @@ export default class DataPreview extends LightningElement {
      * Update displayed data based on selected object
      */
     updateDisplayedData() {
-        if (!this.displayedObject || !this.objectMap.has(this.displayedObject)) {
+        console.log('Updating displayed data for object:', this.displayedObject);
+        console.log('Object map has keys:', Object.keys(this.objectMap));
+        
+        if (!this.displayedObject || !this.objectMap[this.displayedObject]) {
+            console.warn('No displayed object selected or not found in objectMap');
             this.previewData = [];
             this.columns = [];
             this.noValidRecords = true;
             return;
         }
 
-        const records = this.objectMap.get(this.displayedObject);
+        const objectData = this.objectMap[this.displayedObject];
         
-        if (!records || records.length === 0) {
+        if (!objectData || !objectData.records || !objectData.records.length) {
+            console.warn('No records for displayed object:', this.displayedObject);
             this.noValidRecords = true;
             return;
         }
 
         try {
-            // Create columns based on first record
-            const firstRecord = records[0];
+            // Get raw records for this object
+            const rawRecords = objectData.records;
+            const firstRecord = rawRecords[0];
             
-            // Get all field names except 'attributes' and 'Id'
+            // Debug information
+            console.log('Updating display with first record:', JSON.stringify(firstRecord));
+            
+            // Get all field names except 'attributes'
             const fields = Object.keys(firstRecord).filter(field => 
-                field !== 'Id' && field !== 'attributes'
+                field !== 'attributes'
             );
 
             if (fields.length === 0) {
+                console.warn('No fields found in record');
                 this.noValidRecords = true;
                 return;
             }
 
+            // Create columns
             this.columns = fields.map(fieldName => ({
-                label: this.formatLabel(fieldName),
+                label: this.formatFieldLabel(fieldName),
                 fieldName: fieldName,
                 type: this.determineColumnType(firstRecord[fieldName])
             }));
 
-            // Create data array for lightning-datatable
-            this.previewData = records.map((record, index) => {
+            // Format records for datatable
+            this.previewData = rawRecords.map((record, index) => {
                 const row = {};
-                row.key = index;
+                // Use index plus timestamp for unique key
+                row.key = `${this.displayedObject}_${index}_${Date.now()}`;
                 
-                // Handle nested or special types for display
-                fields.forEach(field => {
-                    if (record[field] === null || record[field] === undefined) {
-                        row[field] = '';
-                    } else if (typeof record[field] === 'object') {
-                        // Stringify objects for display
-                        row[field] = JSON.stringify(record[field]);
-                    } else {
-                        row[field] = record[field];
+                // Copy fields but exclude attributes
+                Object.keys(record).forEach(field => {
+                    if (field !== 'attributes') {
+                        // Handle special types for display
+                        if (record[field] === null || record[field] === undefined) {
+                            row[field] = '';
+                        } else if (typeof record[field] === 'object') {
+                            // Stringify objects for display
+                            row[field] = JSON.stringify(record[field]);
+                        } else {
+                            row[field] = record[field];
+                        }
                     }
                 });
                 
@@ -304,14 +347,19 @@ export default class DataPreview extends LightningElement {
             
             // Clear errors if we have data
             if (this.previewData.length > 0) {
+                console.log('Successfully updated display with', this.previewData.length, 'records');
                 this.noValidRecords = false;
                 this.error = null;
+            } else {
+                console.warn('No valid records found after processing');
+                this.noValidRecords = true;
             }
         } catch (error) {
             console.error('Error updating displayed data:', error);
             this.noValidRecords = true;
             this.previewData = [];
             this.columns = [];
+            this.error = error.message || 'Error displaying records';
         }
     }
 
@@ -337,7 +385,7 @@ export default class DataPreview extends LightningElement {
      * Handle insert button click
      */
     handleInsert() {
-        if (!this.configJson || this.objectMap.size === 0) {
+        if (!this.configJson || Object.keys(this.objectMap).length === 0) {
             this.showToast('Error', 'No data available to insert', 'error');
             return;
         }
@@ -347,12 +395,16 @@ export default class DataPreview extends LightningElement {
         this.successMessage = null;
 
         try {
-            // Convert Map to object for Apex
+            // Create records map for Apex
             const recordsObject = {};
-            this.objectMap.forEach((value, key) => {
-                // Ensure the values are valid and can be serialized
-                if (value && Array.isArray(value) && value.length > 0) {
-                    recordsObject[key] = value;
+            
+            // Add records for each object type
+            Object.keys(this.objectMap).forEach(objectName => {
+                const objectData = this.objectMap[objectName];
+                
+                // Ensure we have valid records
+                if (objectData && objectData.records && objectData.records.length > 0) {
+                    recordsObject[objectName] = objectData.records;
                 }
             });
 
@@ -360,6 +412,8 @@ export default class DataPreview extends LightningElement {
             if (Object.keys(recordsObject).length === 0) {
                 throw new Error('No valid records to insert');
             }
+            
+            console.log('Sending records for insertion:', JSON.stringify(recordsObject));
 
             insertRecords({ records: recordsObject })
                 .then(result => {
