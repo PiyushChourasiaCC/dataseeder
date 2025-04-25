@@ -41,12 +41,15 @@ export default class DataPreview extends LightningElement {
         this.previewData = [];
         this.columns = [];
         this.objectMap = {};
+        this.objectOptions = [];
+        this.displayedObject = null;
         this.noValidRecords = false;
         
         // Use the same method that's called by the Generate & Insert Directly button
         // but we'll only get the data without inserting
         generateData({ configJson: this.configJson })
             .then(result => {
+                console.log('Received data from server');
                 this.processGeneratedData(result);
                 this.isLoading = false;
             })
@@ -103,7 +106,7 @@ export default class DataPreview extends LightningElement {
      */
     processGeneratedData(data) {
         try {
-            console.log('Received data:', JSON.stringify(data));
+            console.log('Processing data:', JSON.stringify(data));
             
             // Validate data
             if (!data) {
@@ -143,6 +146,7 @@ export default class DataPreview extends LightningElement {
             this.previewData = [];
             this.objectMap = {};
             let hasValidData = false;
+            let firstValidObject = null;
 
             // Process each object type
             data.objects.forEach(obj => {
@@ -182,6 +186,9 @@ export default class DataPreview extends LightningElement {
 
                 // We have valid records and columns
                 hasValidData = true;
+                if (!firstValidObject) {
+                    firstValidObject = objectName;
+                }
                 
                 // Store in object map for selection dropdown
                 this.objectMap[objectName] = {
@@ -192,13 +199,6 @@ export default class DataPreview extends LightningElement {
                     columns: columns,
                     formattedRecords: formattedRecords
                 };
-                
-                // Set the first object as displayed by default
-                if (!this.displayedObject) {
-                    this.displayedObject = objectName;
-                    this.columns = columns;
-                    this.previewData = formattedRecords;
-                }
             });
 
             // Create object options for the dropdown
@@ -214,10 +214,11 @@ export default class DataPreview extends LightningElement {
                 
                 this.objectOptions = objectOptions;
                 
-                if (!this.displayedObject && objectOptions.length > 0) {
-                    this.displayedObject = objectOptions[0].value;
-                    this.updateDisplayedData();
-                }
+                // Set the displayed object to the first valid one
+                this.displayedObject = firstValidObject;
+                
+                // Update the displayed data based on the selected object
+                this.updateDisplayedData();
             } else {
                 this.showToast('Warning', 'No valid records were generated', 'warning');
                 this.noValidRecords = true;
@@ -360,35 +361,58 @@ export default class DataPreview extends LightningElement {
      */
     updateDisplayedData() {
         console.log('Updating displayed data for object:', this.displayedObject);
+        console.log('Available objects:', Object.keys(this.objectMap));
         
-        if (!this.displayedObject || !this.objectMap[this.displayedObject]) {
-            console.warn('No displayed object selected or not found in objectMap');
+        // If no object is selected or if the object map is empty
+        if (!this.displayedObject || Object.keys(this.objectMap).length === 0) {
+            console.warn('No object selected or no objects available');
             this.previewData = [];
             this.columns = [];
             this.noValidRecords = true;
             return;
         }
 
+        // If the selected object doesn't exist in the map
+        if (!this.objectMap[this.displayedObject]) {
+            console.warn('Selected object not found in object map:', this.displayedObject);
+            
+            // Try to use the first available object instead
+            const availableObjects = Object.keys(this.objectMap);
+            if (availableObjects.length > 0) {
+                this.displayedObject = availableObjects[0];
+                console.log('Using first available object instead:', this.displayedObject);
+            } else {
+                this.previewData = [];
+                this.columns = [];
+                this.noValidRecords = true;
+                return;
+            }
+        }
+
         const objectData = this.objectMap[this.displayedObject];
         
-        if (!objectData || !objectData.formattedRecords || !objectData.formattedRecords.length) {
-            console.warn('No records for displayed object:', this.displayedObject);
+        if (!objectData || !objectData.formattedRecords || objectData.formattedRecords.length === 0) {
+            console.warn('No records available for object:', this.displayedObject);
             this.noValidRecords = true;
+            this.previewData = [];
+            this.columns = [];
             return;
         }
 
         try {
             // Use the pre-processed columns and records
-            this.columns = objectData.columns;
-            this.previewData = objectData.formattedRecords;
+            this.columns = objectData.columns || [];
+            this.previewData = objectData.formattedRecords || [];
+            
+            console.log('Updated display with columns:', this.columns.length);
+            console.log('Updated display with records:', this.previewData.length);
             
             // Clear error if we have data
             if (this.previewData.length > 0) {
-                console.log('Successfully updated display with', this.previewData.length, 'records');
                 this.noValidRecords = false;
                 this.error = null;
             } else {
-                console.warn('No valid records found after processing');
+                console.warn('No valid records to display');
                 this.noValidRecords = true;
             }
         } catch (error) {
