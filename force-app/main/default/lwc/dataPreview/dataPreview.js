@@ -3,7 +3,7 @@ import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 
 // Apex methods
 import generateData from '@salesforce/apex/DataGenerationService.generateData';
-import insertRecords from '@salesforce/apex/DataInsertionService.insertRecords';
+import insertRecordsFromJson from '@salesforce/apex/DataInsertionService.insertRecordsFromJson';
 import generateAndInsert from '@salesforce/apex/DataGenerationService.generateAndInsert';
 
 export default class DataPreview extends LightningElement {
@@ -13,7 +13,7 @@ export default class DataPreview extends LightningElement {
     @track columns = [];
     @track error;
     @track successMessage;
-    @track objectMap = new Map();
+    @track objectMap = {};
     @track displayedObject;
     @track objectOptions = [];
     @track noValidRecords = false;
@@ -40,9 +40,11 @@ export default class DataPreview extends LightningElement {
         this.successMessage = null;
         this.previewData = [];
         this.columns = [];
-        this.objectMap = new Map();
+        this.objectMap = {};
         this.noValidRecords = false;
         
+        // Use the same method that's called by the Generate & Insert Directly button
+        // but we'll only get the data without inserting
         generateData({ configJson: this.configJson })
             .then(result => {
                 this.processGeneratedData(result);
@@ -157,91 +159,49 @@ export default class DataPreview extends LightningElement {
                     return; // Skip objects with no records
                 }
 
-                // Create columns based on the first record's fields
-                const columns = [];
-                const firstRecord = obj.records[0];
-                
-                // Debug information to identify issues
-                console.log('Processing object:', objectName);
-                console.log('First record:', JSON.stringify(firstRecord));
-
-                // Ensure we have a valid record with attributes
-                if (!firstRecord || typeof firstRecord !== 'object' || !firstRecord.attributes) {
-                    console.error('Invalid record structure for', objectName, firstRecord);
-                    return; // Skip this object if record structure is invalid
+                // Process records to ensure they have proper attributes
+                const processedRecords = this.ensureRecordAttributes(obj.records, objectName);
+                if (processedRecords.length === 0) {
+                    console.warn('No valid records found after processing for', objectName);
+                    return;
                 }
 
-                // Get all fields from the first record (excluding attributes)
-                const fields = Object.keys(firstRecord).filter(key => key !== 'attributes');
+                // Create columns dynamically based on the first record
+                const columns = this.createColumnsFromRecord(processedRecords[0], objectName);
+                if (columns.length === 0) {
+                    console.warn('No valid columns found for', objectName);
+                    return;
+                }
+
+                // Format records for the datatable
+                const formattedRecords = this.formatRecordsForDataTable(processedRecords);
+                if (formattedRecords.length === 0) {
+                    console.warn('No valid formatted records for', objectName);
+                    return;
+                }
+
+                // We have valid records and columns
+                hasValidData = true;
                 
-                // Create a column for each field
-                fields.forEach(fieldName => {
-                    // Skip internal/system fields
-                    if (fieldName.startsWith('_') || fieldName === 'attributes') {
-                        return;
-                    }
-                    
-                    const fieldValue = firstRecord[fieldName];
-                    const columnType = this.determineColumnType(fieldValue);
-                    
-                    columns.push({
-                        label: this.formatFieldLabel(fieldName),
-                        fieldName: fieldName,
-                        type: columnType,
-                        sortable: true,
-                        cellAttributes: { 
-                            alignment: columnType === 'number' || columnType === 'currency' ? 'right' : 'left' 
-                        }
-                    });
-                });
-
-                // Format records for datatable
-                const formattedRecords = obj.records.map(record => {
-                    // Skip invalid records
-                    if (!record || typeof record !== 'object' || !record.attributes) {
-                        console.warn('Skipping invalid record:', record);
-                        return null;
-                    }
-                    
-                    // Create a new record for datatable with a unique id
-                    const formattedRecord = {};
-                    formattedRecord.id = this.generateId();
-                    formattedRecord.key = formattedRecord.id; // Add key for datatable
-                    formattedRecord.sobjectType = record.attributes.type;
-                    
-                    // Copy all fields excluding attributes
-                    Object.keys(record).forEach(field => {
-                        if (field !== 'attributes') {
-                            formattedRecord[field] = record[field];
-                        }
-                    });
-                    
-                    return formattedRecord;
-                }).filter(record => record !== null); // Remove null records
-
-                // Only add objects that have valid records
-                if (formattedRecords.length > 0) {
-                    hasValidData = true;
-                    
-                    // Store raw records for insertion
-                    const rawRecords = [...obj.records];
-                    
-                    // Add to object map for selection dropdown
-                    this.objectMap[objectName] = {
-                        label: this.formatFieldLabel(objectName),
-                        value: objectName,
-                        count: formattedRecords.length,
-                        records: rawRecords
-                    };
-                    
-                    // Set the displayed data for this object
+                // Store in object map for selection dropdown
+                this.objectMap[objectName] = {
+                    label: this.formatFieldLabel(objectName),
+                    value: objectName,
+                    count: formattedRecords.length,
+                    records: processedRecords,
+                    columns: columns,
+                    formattedRecords: formattedRecords
+                };
+                
+                // Set the first object as displayed by default
+                if (!this.displayedObject) {
+                    this.displayedObject = objectName;
                     this.columns = columns;
                     this.previewData = formattedRecords;
-                    this.displayedObject = objectName;
                 }
             });
 
-            // If we have valid data, create object options and select the first one
+            // Create object options for the dropdown
             if (hasValidData) {
                 const objectOptions = [];
                 
@@ -273,11 +233,133 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
+     * Ensure all records have proper attributes for serialization
+     */
+    ensureRecordAttributes(records, objectName) {
+        const processedRecords = [];
+        
+        if (!records || !Array.isArray(records) || !objectName) {
+            return processedRecords;
+        }
+        
+        records.forEach(record => {
+            try {
+                if (!record) return;
+                
+                // Create a copy to avoid modifying the original
+                const recordCopy = { ...record };
+                
+                // Ensure the record has attributes
+                if (!recordCopy.attributes) {
+                    recordCopy.attributes = { type: objectName };
+                } else if (typeof recordCopy.attributes === 'object') {
+                    // Ensure the type attribute is set correctly
+                    if (!recordCopy.attributes.type) {
+                        recordCopy.attributes.type = objectName;
+                    }
+                }
+                
+                // Ensure all field values are properly typed for display
+                Object.keys(recordCopy).forEach(field => {
+                    if (field !== 'attributes') {
+                        if (recordCopy[field] === null || recordCopy[field] === undefined) {
+                            recordCopy[field] = '';
+                        }
+                    }
+                });
+                
+                processedRecords.push(recordCopy);
+            } catch (error) {
+                console.error('Error processing record:', error);
+            }
+        });
+        
+        return processedRecords;
+    }
+
+    /**
+     * Create columns from a record
+     */
+    createColumnsFromRecord(record, objectName) {
+        const columns = [];
+        
+        if (!record || typeof record !== 'object') {
+            return columns;
+        }
+        
+        // Get all fields excluding attributes
+        const fields = Object.keys(record).filter(key => key !== 'attributes');
+        
+        // Create a column for each field
+        fields.forEach(fieldName => {
+            // Skip system fields
+            if (fieldName.startsWith('_')) {
+                return;
+            }
+            
+            const fieldValue = record[fieldName];
+            const columnType = this.determineColumnType(fieldValue);
+            
+            columns.push({
+                label: this.formatFieldLabel(fieldName),
+                fieldName: fieldName,
+                type: columnType,
+                sortable: true,
+                cellAttributes: { 
+                    alignment: columnType === 'number' || columnType === 'currency' ? 'right' : 'left' 
+                }
+            });
+        });
+        
+        return columns;
+    }
+
+    /**
+     * Format records for the lightning datatable
+     */
+    formatRecordsForDataTable(records) {
+        const formattedRecords = [];
+        
+        if (!records || !Array.isArray(records)) {
+            return formattedRecords;
+        }
+        
+        records.forEach((record, index) => {
+            try {
+                const row = {};
+                
+                // Add a unique key for the datatable
+                row.key = `row_${index}_${Date.now()}`;
+                
+                // Copy all fields except attributes
+                Object.keys(record).forEach(field => {
+                    if (field !== 'attributes') {
+                        // Format values for display
+                        if (record[field] === null || record[field] === undefined) {
+                            row[field] = '';
+                        } else if (typeof record[field] === 'object') {
+                            // Handle objects by converting to string
+                            row[field] = JSON.stringify(record[field]);
+                        } else {
+                            row[field] = record[field];
+                        }
+                    }
+                });
+                
+                formattedRecords.push(row);
+            } catch (error) {
+                console.error('Error formatting record:', error);
+            }
+        });
+        
+        return formattedRecords;
+    }
+
+    /**
      * Update displayed data based on selected object
      */
     updateDisplayedData() {
         console.log('Updating displayed data for object:', this.displayedObject);
-        console.log('Object map has keys:', Object.keys(this.objectMap));
         
         if (!this.displayedObject || !this.objectMap[this.displayedObject]) {
             console.warn('No displayed object selected or not found in objectMap');
@@ -289,63 +371,18 @@ export default class DataPreview extends LightningElement {
 
         const objectData = this.objectMap[this.displayedObject];
         
-        if (!objectData || !objectData.records || !objectData.records.length) {
+        if (!objectData || !objectData.formattedRecords || !objectData.formattedRecords.length) {
             console.warn('No records for displayed object:', this.displayedObject);
             this.noValidRecords = true;
             return;
         }
 
         try {
-            // Get raw records for this object
-            const rawRecords = objectData.records;
-            const firstRecord = rawRecords[0];
+            // Use the pre-processed columns and records
+            this.columns = objectData.columns;
+            this.previewData = objectData.formattedRecords;
             
-            // Debug information
-            console.log('Updating display with first record:', JSON.stringify(firstRecord));
-            
-            // Get all field names except 'attributes'
-            const fields = Object.keys(firstRecord).filter(field => 
-                field !== 'attributes'
-            );
-
-            if (fields.length === 0) {
-                console.warn('No fields found in record');
-                this.noValidRecords = true;
-                return;
-            }
-
-            // Create columns
-            this.columns = fields.map(fieldName => ({
-                label: this.formatFieldLabel(fieldName),
-                fieldName: fieldName,
-                type: this.determineColumnType(firstRecord[fieldName])
-            }));
-
-            // Format records for datatable
-            this.previewData = rawRecords.map((record, index) => {
-                const row = {};
-                // Use index plus timestamp for unique key
-                row.key = `${this.displayedObject}_${index}_${Date.now()}`;
-                
-                // Copy fields but exclude attributes
-                Object.keys(record).forEach(field => {
-                    if (field !== 'attributes') {
-                        // Handle special types for display
-                        if (record[field] === null || record[field] === undefined) {
-                            row[field] = '';
-                        } else if (typeof record[field] === 'object') {
-                            // Stringify objects for display
-                            row[field] = JSON.stringify(record[field]);
-                        } else {
-                            row[field] = record[field];
-                        }
-                    }
-                });
-                
-                return row;
-            });
-            
-            // Clear errors if we have data
+            // Clear error if we have data
             if (this.previewData.length > 0) {
                 console.log('Successfully updated display with', this.previewData.length, 'records');
                 this.noValidRecords = false;
@@ -364,21 +401,11 @@ export default class DataPreview extends LightningElement {
     }
 
     /**
-     * Format a field name as a nicer label
+     * Handle object change from dropdown
      */
-    formatLabel(fieldName) {
-        // Special case for fields ending with __c (custom fields)
-        if (fieldName.endsWith('__c')) {
-            fieldName = fieldName.substring(0, fieldName.length - 3);
-        }
-        
-        // Split by capital letters and underscores
-        const words = fieldName.split(/(?=[A-Z])/).join(' ').split('_').join(' ');
-        
-        // Capitalize first letter of each word
-        return words.split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
+    handleObjectChange(event) {
+        this.displayedObject = event.detail.value;
+        this.updateDisplayedData();
     }
 
     /**
@@ -394,119 +421,87 @@ export default class DataPreview extends LightningElement {
         this.error = null;
         this.successMessage = null;
 
-        try {
-            // Create records map for Apex
-            const recordsObject = {};
-            
-            // Add records for each object type
-            Object.keys(this.objectMap).forEach(objectName => {
-                const objectData = this.objectMap[objectName];
-                
-                // Ensure we have valid records
-                if (objectData && objectData.records && objectData.records.length > 0) {
-                    recordsObject[objectName] = objectData.records;
+        // Create records map from object map for insertion
+        const recordsMap = {};
+        Object.keys(this.objectMap).forEach(objectName => {
+            recordsMap[objectName] = this.objectMap[objectName].records;
+        });
+
+        // Call Apex to insert the records
+        insertRecordsFromJson({ recordsJson: JSON.stringify(recordsMap) })
+            .then(result => {
+                if (result && result.success) {
+                    let totalRecords = 0;
+                    const recordCounts = result.insertedRecordIds || {};
+                    
+                    Object.keys(recordCounts).forEach(objName => {
+                        const count = recordCounts[objName].length;
+                        totalRecords += count;
+                    });
+                    
+                    this.successMessage = `Successfully inserted ${totalRecords} records`;
+                    this.showToast('Success', this.successMessage, 'success');
+                } else {
+                    this.error = 'Insert operation failed: ' + (result && result.errors ? result.errors.join(', ') : 'Unknown error');
+                    this.showToast('Error', this.error, 'error');
                 }
+                this.isLoading = false;
+            })
+            .catch(error => {
+                this.handleError(error, 'Error inserting records');
+                this.isLoading = false;
             });
-
-            // Verify we have records to insert
-            if (Object.keys(recordsObject).length === 0) {
-                throw new Error('No valid records to insert');
-            }
-            
-            console.log('Sending records for insertion:', JSON.stringify(recordsObject));
-
-            insertRecords({ records: recordsObject })
-                .then(result => {
-                    if (result && result.success) {
-                        let totalRecords = 0;
-                        if (result.insertedRecordIds) {
-                            Object.values(result.insertedRecordIds).forEach(ids => {
-                                if (ids && Array.isArray(ids)) {
-                                    totalRecords += ids.length;
-                                }
-                            });
-                        }
-                        
-                        this.successMessage = `Successfully inserted ${totalRecords} records`;
-                        this.showToast('Success', this.successMessage, 'success');
-                    } else {
-                        this.error = 'Insert failed: ' + (result && result.errors ? result.errors.join(', ') : 'Unknown error');
-                        this.showToast('Error', this.error, 'error');
-                    }
-                    this.isLoading = false;
-                })
-                .catch(error => {
-                    this.handleError(error, 'Error inserting records');
-                    this.isLoading = false;
-                });
-        } catch (error) {
-            this.handleError(error, 'Error preparing records for insertion');
-            this.isLoading = false;
-        }
     }
 
     /**
-     * Handle object selection change
-     */
-    handleObjectChange(event) {
-        this.displayedObject = event.detail.value;
-        this.updateDisplayedData();
-    }
-
-    /**
-     * Show toast notification
+     * Show a toast message
      */
     showToast(title, message, variant) {
         this.dispatchEvent(
             new ShowToastEvent({
-                title,
-                message,
-                variant
+                title: title,
+                message: message,
+                variant: variant || 'info'
             })
         );
     }
 
     /**
-     * Handle error with toast notification
+     * Handle errors from Apex calls
      */
     handleError(error, fallbackMessage) {
-        console.error(error);
-        const message = error.body?.message || error.message || fallbackMessage;
-        this.showToast('Error', message, 'error');
-        this.error = message;
+        console.error(fallbackMessage, error);
+        const errorMsg = error.body?.message || error.message || fallbackMessage;
+        this.error = errorMsg;
+        this.showToast('Error', errorMsg, 'error');
     }
 
     /**
      * Generate a unique ID for records
-     * @returns {string} A unique ID
      */
     generateId() {
-        return 'id_' + Math.random().toString(36).substr(2, 9);
+        return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
 
     /**
-     * Format a field name into a readable label
-     * @param {string} fieldName The API name of the field
-     * @returns {string} A formatted label
+     * Format a field name for display
      */
     formatFieldLabel(fieldName) {
-        if (!fieldName) return '';
-        // Handle relationship fields
-        if (fieldName.endsWith('__r')) {
-            fieldName = fieldName.replace('__r', '');
+        // Special case for custom fields ending with __c
+        if (fieldName.endsWith('__c')) {
+            fieldName = fieldName.substring(0, fieldName.length - 3);
         }
-        // Split by underscore and capitalize
+        
+        // Split by capital letters and underscores
         return fieldName
-            .replace(/__c$/g, '')
             .replace(/_/g, ' ')
-            .split(/(?=[A-Z])/).join(' ')
-            .replace(/\b\w/g, l => l.toUpperCase());
+            .replace(/([A-Z])/g, ' $1')
+            .replace(/^./, str => str.toUpperCase())
+            .trim();
     }
 
     /**
-     * Determine the column type based on the field value
-     * @param {*} value The field value
-     * @returns {string} The column type for lightning-datatable
+     * Determine the column type based on value
      */
     determineColumnType(value) {
         if (value === null || value === undefined) {
@@ -515,24 +510,32 @@ export default class DataPreview extends LightningElement {
         
         const type = typeof value;
         
-        switch (type) {
-            case 'number':
-                return Number.isInteger(value) ? 'number' : 'currency';
-            case 'boolean':
-                return 'boolean';
-            case 'object':
-                if (value instanceof Date) {
-                    return 'date';
-                }
-                return 'text';
-            default:
-                // Check if it looks like a date string
-                if (typeof value === 'string' && 
-                    (value.match(/^\d{4}-\d{2}-\d{2}$/) || 
-                     value.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/))) {
-                    return 'date';
-                }
-                return 'text';
+        if (type === 'number') {
+            return value % 1 === 0 ? 'number' : 'currency';
+        } else if (type === 'boolean') {
+            return 'boolean';
+        } else if (type === 'string') {
+            // Check if it's a URL
+            if (value.startsWith('http://') || value.startsWith('https://')) {
+                return 'url';
+            }
+            
+            // Check if it's an email
+            if (value.includes('@') && value.includes('.')) {
+                return 'email';
+            }
+            
+            // Check if it's a phone number
+            if (/^\+?[\d\s-().]+$/.test(value)) {
+                return 'phone';
+            }
+            
+            // Check if it's a date
+            if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+                return 'date';
+            }
         }
+        
+        return 'text';
     }
 } 

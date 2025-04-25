@@ -138,6 +138,76 @@ public without sharing class DataInsertionService {
     }
     
     /**
+     * Insert records from JSON string
+     * 
+     * @param recordsJson JSON string containing records to insert
+     * @return DataInsertionResult Object containing insertion results and errors
+     */
+    @AuraEnabled
+    public static DataInsertionResult insertRecordsFromJson(String recordsJson) {
+        try {
+            // Deserialize the JSON string to a map of objects
+            Map<String, Object> recordsMap = (Map<String, Object>) JSON.deserializeUntyped(recordsJson);
+            
+            // Convert to appropriate SObject types
+            Map<String, List<SObject>> typedRecords = new Map<String, List<SObject>>();
+            
+            for (String objectName : recordsMap.keySet()) {
+                Object recordsObj = recordsMap.get(objectName);
+                if (recordsObj instanceof List<Object>) {
+                    List<Object> recordsList = (List<Object>) recordsObj;
+                    List<SObject> typedList = new List<SObject>();
+                    
+                    for (Object recordObj : recordsList) {
+                        if (recordObj instanceof Map<String, Object>) {
+                            Map<String, Object> recordMap = (Map<String, Object>) recordObj;
+                            
+                            // Get SObject type from attributes
+                            String sobjectType = objectName;
+                            if (recordMap.containsKey('attributes') && recordMap.get('attributes') instanceof Map<String, Object>) {
+                                Map<String, Object> attributes = (Map<String, Object>) recordMap.get('attributes');
+                                if (attributes.containsKey('type')) {
+                                    sobjectType = (String) attributes.get('type');
+                                }
+                            }
+                            
+                            // Create SObject with the right type
+                            Schema.SObjectType targetType = Schema.getGlobalDescribe().get(sobjectType);
+                            if (targetType == null) {
+                                throw new DataInsertionException('Invalid SObject type: ' + sobjectType);
+                            }
+                            
+                            SObject sobj = targetType.newSObject();
+                            
+                            // Copy fields (excluding attributes)
+                            for (String fieldName : recordMap.keySet()) {
+                                if (fieldName != 'attributes') {
+                                    sobj.put(fieldName, recordMap.get(fieldName));
+                                }
+                            }
+                            
+                            typedList.add(sobj);
+                        }
+                    }
+                    
+                    if (!typedList.isEmpty()) {
+                        typedRecords.put(objectName, typedList);
+                    }
+                }
+            }
+            
+            // Now call the regular insertRecords method
+            return insertRecords(typedRecords);
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error deserializing records JSON: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            DataInsertionResult result = new DataInsertionResult();
+            result.success = false;
+            result.errors.add('Error processing records: ' + e.getMessage());
+            return result;
+        }
+    }
+    
+    /**
      * Determine proper insertion order based on relationships
      * 
      * @param records Map of SObject API names to lists of records
