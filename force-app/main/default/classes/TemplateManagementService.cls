@@ -409,4 +409,57 @@ public with sharing class TemplateManagementService {
      * Custom exception class for template management errors
      */
     public class TemplateManagementException extends Exception {}
+
+    /**
+     * Get all objects where the user has create access
+     * @return List<Map<String,String>> List of object info with label and API name
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<Map<String,String>> getCreatableObjects() {
+        List<Map<String,String>> creatableObjects = new List<Map<String,String>>();
+        Map<String, Map<String,String>> objectsByLabel = new Map<String, Map<String,String>>();
+        
+        Map<String, Schema.SObjectType> globalDescribe = Schema.getGlobalDescribe();
+        
+        for(String objName : globalDescribe.keySet()) {
+            Schema.DescribeSObjectResult objDescribe = globalDescribe.get(objName).getDescribe();
+            
+            // Only include objects that are creatable and not a system object
+            if(objDescribe.isCreateable() && 
+               !objName.startsWith('System') && 
+               !objName.endsWith('__Share') && 
+               !objName.endsWith('__History') && 
+               !objName.endsWith('__Feed') &&
+               !objName.endsWith('ChangeEvent')) {
+                
+                Map<String,String> objInfo = new Map<String,String>();
+                String objLabel = objDescribe.getLabel();
+                objInfo.put('label', objLabel);
+                objInfo.put('value', objDescribe.getName());
+                
+                // Store in map by label for sorting
+                objectsByLabel.put(objLabel, objInfo);
+            }
+        }
+        
+        // Sort by label
+        List<String> sortedLabels = new List<String>(objectsByLabel.keySet());
+        sortedLabels.sort();
+        
+        // Build final sorted list
+        for(String label : sortedLabels) {
+            creatableObjects.add(objectsByLabel.get(label));
+        }
+        
+        return creatableObjects;
+    }
+    
+    /**
+     * Determine if a field is a lookup relationship
+     * @param fieldDescribe The field describe result
+     * @return Boolean True if the field is a lookup
+     */
+    private static Boolean isLookupField(Schema.DescribeFieldResult fieldDescribe) {
+        return (fieldDescribe.getType() == Schema.DisplayType.REFERENCE);
+    }
 } 

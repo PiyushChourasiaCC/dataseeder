@@ -4,28 +4,11 @@ import { getPicklistValues } from 'lightning/uiObjectInfoApi';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 
 // Apex methods
-import getAllActiveTemplates from '@salesforce/apex/TemplateManagementService.getAllActiveTemplates';
-import getTemplateById from '@salesforce/apex/TemplateManagementService.getTemplateById';
-import createTemplate from '@salesforce/apex/TemplateManagementService.createTemplate';
-import updateTemplate from '@salesforce/apex/TemplateManagementService.updateTemplate';
-import cloneTemplate from '@salesforce/apex/TemplateManagementService.cloneTemplate';
-import deleteTemplate from '@salesforce/apex/TemplateManagementService.deleteTemplate';
+import getCreatableObjects from '@salesforce/apex/TemplateManagementService.getCreatableObjects';
 import getObjectFields from '@salesforce/apex/TemplateManagementService.getObjectFields';
 
 export default class SeederConfiguration extends LightningElement {
-    @track templates = [];
-    @track selectedTemplate = {};
     @track isLoading = false;
-    @track showTemplateModal = false;
-    @track templateData = {
-        id: null,
-        name: '',
-        description: '',
-        configJson: '',
-        isActive: true
-    };
-    @track isEdit = false;
-    @track error;
     @track showObjectSelector = false;
     @track showFieldSelector = false;
     @track selectedObject;
@@ -38,20 +21,11 @@ export default class SeederConfiguration extends LightningElement {
         industry: '',
         region: ''
     };
+    @track error;
 
     // Constants
     MAX_FIELDS_PER_OBJECT = 15;
     MAX_TOTAL_RECORDS = 50;
-
-    // Getter for selectedTemplateId to safely handle undefined
-    get selectedTemplateId() {
-        return this.selectedTemplate && this.selectedTemplate.Id ? this.selectedTemplate.Id : '';
-    }
-
-    // Computed property for template actions
-    get disableTemplateActions() {
-        return !this.selectedTemplate || !this.selectedTemplate.Id;
-    }
 
     // Computed property for field configuration
     get disableFieldConfig() {
@@ -73,16 +47,11 @@ export default class SeederConfiguration extends LightningElement {
         return this.selectedFields.map(field => field.name);
     }
 
-    // Computed property to disable JSON editing in modal
-    get disableConfigJson() {
-        // Only allow direct JSON editing when creating a new template
-        return this.isEdit;
-    }
-
     // Field columns for datatable
     fieldColumns = [
         { label: 'Field Name', fieldName: 'name', type: 'text' },
-        { label: 'Field Type', fieldName: 'type', type: 'text' }
+        { label: 'Field Type', fieldName: 'type', type: 'text' },
+        { label: 'Required', fieldName: 'required', type: 'boolean' }
     ];
 
     // Sample locale options
@@ -113,146 +82,94 @@ export default class SeederConfiguration extends LightningElement {
     ];
 
     connectedCallback() {
-        this.loadTemplates();
+        // Initialize with default values
+        this.contextSettings = {
+            locale: 'en_US',
+            industry: '',
+            region: ''
+        };
+        this.recordCount = 5;
     }
 
     /**
-     * Load all active templates
+     * Handle Configure Objects button click
      */
-    loadTemplates() {
+    handleConfigureObjects() {
+        this.showObjectSelector = true;
+        this.loadObjectOptions();
+    }
+
+    /**
+     * Handle Configure Fields button click
+     */
+    handleConfigureFields() {
+        if (this.selectedObject) {
+            this.showFieldSelector = true;
+            this.loadFieldOptions();
+        }
+    }
+
+    /**
+     * Load all creatable Salesforce objects
+     */
+    loadObjectOptions() {
         this.isLoading = true;
-        getAllActiveTemplates()
+        
+        getCreatableObjects()
             .then(result => {
-                // Format templates for combobox
-                this.templates = result.map(template => ({
-                    label: template.Name,
-                    value: template.Id,
-                    description: template.Description__c
+                this.objectOptions = result.map(obj => ({
+                    label: obj.label,
+                    value: obj.value
                 }));
-                this.isLoading = false;
             })
             .catch(error => {
-                this.handleError(error, 'Error loading templates');
+                this.handleError(error, 'Error loading objects');
+            })
+            .finally(() => {
                 this.isLoading = false;
             });
     }
 
     /**
-     * Handle template selection
+     * Load fields for selected object
      */
-    handleTemplateChange(event) {
-        const templateId = event.detail.value;
-        if (templateId) {
-            this.isLoading = true;
-            getTemplateById({ templateId: templateId })
-                .then(result => {
-                    this.selectedTemplate = result;
-                    try {
-                        const config = JSON.parse(result.ConfigurationJSON__c);
-                        this.processTemplateConfig(config);
-                    } catch (error) {
-                        this.handleError(error, 'Error parsing template configuration');
-                    }
-                    this.isLoading = false;
-                })
-                .catch(error => {
-                    this.handleError(error, 'Error loading template details');
-                    this.isLoading = false;
-                });
-        } else {
-            this.selectedTemplate = null;
-        }
-    }
-
-    /**
-     * Process the template configuration
-     */
-    processTemplateConfig(config) {
-        if (config.context) {
-            this.contextSettings = { ...config.context };
-        }
+    loadFieldOptions() {
+        if (!this.selectedObject) return;
         
-        if (config.objects && config.objects.length > 0) {
-            const firstObject = config.objects[0];
-            this.selectedObject = firstObject.name;
-            this.recordCount = firstObject.count || 5;
-            
-            if (firstObject.fields) {
-                this.selectedFields = firstObject.fields.map(field => ({
-                    name: field.name,
-                    type: field.type,
-                    ...field
-                }));
-            }
-        }
-        
-        // Dispatch configuration change event with the selected template's JSON
-        if (this.selectedTemplate) {
-            this.dispatchConfigChange(this.selectedTemplate.ConfigurationJSON__c);
-        }
-    }
-
-    /**
-     * Open the template modal for create/edit
-     */
-    handleNewTemplate() {
-        this.isEdit = false;
-        this.templateData = {
-            id: null,
-            name: '',
-            description: '',
-            configJson: this.generateConfigJson(),
-            isActive: true
-        };
-        this.showTemplateModal = true;
-    }
-
-    /**
-     * Open the template modal for editing
-     */
-    handleEditTemplate() {
-        if (!this.selectedTemplate) {
-            this.showToast('Error', 'Please select a template to edit', 'error');
-            return;
-        }
-        
-        this.isEdit = true;
-        this.templateData = {
-            id: this.selectedTemplate.Id,
-            name: this.selectedTemplate.Name,
-            description: this.selectedTemplate.Description__c,
-            configJson: this.selectedTemplate.ConfigurationJSON__c,
-            isActive: this.selectedTemplate.IsActive__c
-        };
-        this.showTemplateModal = true;
-    }
-
-    /**
-     * Handle template modal save
-     */
-    handleSaveTemplate() {
         this.isLoading = true;
-        const { id, name, description, configJson, isActive } = this.templateData;
         
-        // Update configuration JSON from current settings
-        const updatedConfigJson = this.isEdit ? configJson : this.generateConfigJson();
-        
-        const savePromise = id ? 
-            updateTemplate({ templateId: id, name, description, configJson: updatedConfigJson, isActive }) :
-            createTemplate({ name, description, configJson: updatedConfigJson, isActive });
-            
-        savePromise
+        getObjectFields({ objectName: this.selectedObject })
             .then(result => {
-                this.showToast('Success', `Template ${id ? 'updated' : 'created'} successfully`, 'success');
-                this.showTemplateModal = false;
-                this.loadTemplates();
-                if (!id) {
-                    // If creating a new template, select it
-                    this.selectedTemplate = result;
+                // Filter out lookup fields, non-updateable fields, and external id fields
+                const filteredFields = result.filter(field => {
+                    return field.type !== 'Reference' && 
+                           field.editable !== false;
+                });
+                
+                // Transform field data for the picklist component
+                this.fieldOptions = filteredFields.map(field => ({
+                    label: field.label,
+                    value: field.name,
+                    type: field.type,
+                    required: field.required
+                }));
+                
+                // Pre-select required fields
+                const requiredFieldNames = filteredFields
+                    .filter(field => field.required)
+                    .map(field => field.name);
+                
+                // Update selected fields with required fields preselected
+                if (requiredFieldNames.length > 0) {
+                    this.handleFieldSelection({
+                        detail: {
+                            value: requiredFieldNames
+                        }
+                    });
                 }
             })
             .catch(error => {
-                this.handleError(error, `Error ${id ? 'updating' : 'creating'} template`);
+                this.handleError(error, 'Error loading fields');
             })
             .finally(() => {
                 this.isLoading = false;
@@ -260,201 +177,105 @@ export default class SeederConfiguration extends LightningElement {
     }
 
     /**
-     * Handle template clone
-     */
-    handleCloneTemplate() {
-        if (!this.selectedTemplate) {
-            this.showToast('Error', 'Please select a template to clone', 'error');
-            return;
-        }
-        
-        const newName = `${this.selectedTemplate.Name} (Clone)`;
-        this.isLoading = true;
-        
-        cloneTemplate({ sourceTemplateId: this.selectedTemplate.Id, newName })
-            .then(result => {
-                this.showToast('Success', 'Template cloned successfully', 'success');
-                this.loadTemplates();
-                // Select the new cloned template
-                this.selectedTemplate = result;
-            })
-            .catch(error => {
-                this.handleError(error, 'Error cloning template');
-            })
-            .finally(() => {
-                this.isLoading = false;
-            });
-    }
-
-    /**
-     * Handle template delete
-     */
-    handleDeleteTemplate() {
-        if (!this.selectedTemplate) {
-            this.showToast('Error', 'Please select a template to delete', 'error');
-            return;
-        }
-        
-        if (!confirm('Are you sure you want to delete this template?')) {
-            return;
-        }
-        
-        this.isLoading = true;
-        
-        deleteTemplate({ templateId: this.selectedTemplate.Id })
-            .then(() => {
-                this.showToast('Success', 'Template deleted successfully', 'success');
-                this.selectedTemplate = null;
-                this.loadTemplates();
-            })
-            .catch(error => {
-                this.handleError(error, 'Error deleting template');
-            })
-            .finally(() => {
-                this.isLoading = false;
-            });
-    }
-
-    /**
-     * Toggle object selector visibility
-     */
-    handleConfigureObjects() {
-        this.showObjectSelector = !this.showObjectSelector;
-        if (this.showObjectSelector) {
-            // Load available objects
-            this.loadObjectOptions();
-        }
-    }
-
-    /**
-     * Toggle field selector visibility
-     */
-    handleConfigureFields() {
-        if (!this.selectedObject) {
-            this.showToast('Error', 'Please select an object first', 'error');
-            return;
-        }
-        
-        this.showFieldSelector = !this.showFieldSelector;
-        if (this.showFieldSelector) {
-            // Load available fields for the selected object
-            this.loadFieldOptions();
-        }
-    }
-
-    /**
-     * Load available objects
-     */
-    loadObjectOptions() {
-        // In a real implementation, this would call an Apex method to get available objects
-        // For now, using a static list of common objects
-        this.objectOptions = [
-            { label: 'Account', value: 'Account' },
-            { label: 'Contact', value: 'Contact' },
-            { label: 'Opportunity', value: 'Opportunity' },
-            { label: 'Lead', value: 'Lead' },
-            { label: 'Case', value: 'Case' }
-        ];
-    }
-
-    /**
-     * Load field options for the selected object
-     */
-    loadFieldOptions() {
-        this.isLoading = true;
-        this.fieldOptions = [];
-        
-        try {
-            // Get the SObject type
-            const objectType = this.selectedObject;
-            if (!objectType) {
-                throw new Error('No object selected');
-            }
-            
-            // Call Apex to get field info for this object
-            getObjectFields({ objectName: objectType })
-                .then(result => {
-                    // Map the field data to options format
-                    this.fieldOptions = result.map(field => ({
-                        label: field.label || field.name,
-                        value: field.name,
-                        type: field.type,
-                        attributes: field.attributes || {}
-                    }));
-                    
-                    // Remove any selected fields that no longer exist in the options
-                    const validFieldNames = new Set(this.fieldOptions.map(option => option.value));
-                    this.selectedFields = this.selectedFields.filter(field => 
-                        validFieldNames.has(field.name)
-                    );
-                    
-                    this.isLoading = false;
-                })
-                .catch(error => {
-                    this.handleError(error, 'Error loading fields');
-                    this.isLoading = false;
-                });
-        } catch (error) {
-            this.handleError(error, 'Error initializing field selection');
-            this.isLoading = false;
-        }
-    }
-
-    /**
-     * Handle object selection
+     * Handle object selection change
      */
     handleObjectChange(event) {
         this.selectedObject = event.detail.value;
-        this.selectedFields = []; // Reset selected fields when object changes
-        if (this.showFieldSelector) {
+        this.selectedFields = [];
+        if (this.selectedObject) {
             this.loadFieldOptions();
         }
-        
-        // Generate config and dispatch event
-        this.generateConfigJson();
     }
 
     /**
-     * Handle field selection
+     * Handle field selection change
      */
     handleFieldSelection(event) {
-        const selectedOptions = event.detail.value;
+        const selectedValues = event.detail.value;
         
-        // Check if adding this field would exceed the limit
-        if (selectedOptions.length > this.MAX_FIELDS_PER_OBJECT) {
-            this.showToast('Error', `You can only select up to ${this.MAX_FIELDS_PER_OBJECT} fields per object`, 'error');
+        // Check if we're not exceeding the max fields limit
+        if (selectedValues.length > this.MAX_FIELDS_PER_OBJECT) {
+            this.showToast(
+                'Too many fields selected',
+                `Maximum ${this.MAX_FIELDS_PER_OBJECT} fields allowed per object`,
+                'error'
+            );
             return;
         }
         
-        // Create field objects based on selection
-        this.selectedFields = selectedOptions.map(fieldName => {
+        // Find the required fields
+        const requiredFields = this.fieldOptions
+            .filter(field => field.required)
+            .map(field => field.value);
+        
+        // Ensure all required fields are included
+        const missingRequiredFields = requiredFields.filter(
+            field => !selectedValues.includes(field)
+        );
+        
+        // If required fields are missing, add them and notify the user
+        if (missingRequiredFields.length > 0) {
+            const updatedSelection = [...selectedValues, ...missingRequiredFields];
+            
+            // Update the dual listbox with the corrected selection
+            const dualListbox = this.template.querySelector('lightning-dual-listbox');
+            if (dualListbox) {
+                dualListbox.value = updatedSelection;
+            }
+            
+            this.showToast(
+                'Required fields added',
+                'Required fields cannot be unselected',
+                'info'
+            );
+            
+            // Process the updated selection
+            this.processFieldSelection(updatedSelection);
+        } else {
+            // Process the selection as is
+            this.processFieldSelection(selectedValues);
+        }
+    }
+
+    /**
+     * Process the field selection by updating the component state
+     */
+    processFieldSelection(selectedValues) {
+        // Update selected fields with type information
+        this.selectedFields = selectedValues.map(fieldName => {
             const fieldOption = this.fieldOptions.find(option => option.value === fieldName);
             return {
                 name: fieldName,
-                type: fieldOption ? fieldOption.type : 'String'
+                type: fieldOption.type,
+                required: fieldOption.required
             };
         });
         
-        // Generate config and dispatch event
-        this.generateConfigJson();
+        // Generate and dispatch configuration change
+        this.dispatchConfigChange(this.generateConfigJson());
     }
 
     /**
      * Handle record count change
      */
     handleRecordCountChange(event) {
-        const newCount = parseInt(event.detail.value, 10);
-        if (isNaN(newCount) || newCount < 1) {
-            this.recordCount = 1;
-        } else if (newCount > this.MAX_TOTAL_RECORDS) {
+        const newValue = parseInt(event.detail.value, 10);
+        
+        if (newValue > this.MAX_TOTAL_RECORDS) {
             this.recordCount = this.MAX_TOTAL_RECORDS;
-            this.showToast('Warning', `Record count limited to maximum of ${this.MAX_TOTAL_RECORDS}`, 'warning');
+            this.showToast(
+                'Maximum limit reached',
+                `You can create at most ${this.MAX_TOTAL_RECORDS} records`,
+                'warning'
+            );
+        } else if (newValue < 1) {
+            this.recordCount = 1;
         } else {
-            this.recordCount = newCount;
+            this.recordCount = newValue;
         }
         
-        // Generate config and dispatch event
-        this.generateConfigJson();
+        // Generate and dispatch configuration change
+        this.dispatchConfigChange(this.generateConfigJson());
     }
 
     /**
@@ -462,68 +283,47 @@ export default class SeederConfiguration extends LightningElement {
      */
     handleContextChange(event) {
         const field = event.target.name;
-        const value = event.target.value;
-        this.contextSettings = { ...this.contextSettings, [field]: value };
+        const value = event.detail.value;
         
-        // Generate config and dispatch event
-        this.generateConfigJson();
+        this.contextSettings = {
+            ...this.contextSettings,
+            [field]: value
+        };
+        
+        // Generate and dispatch configuration change
+        this.dispatchConfigChange(this.generateConfigJson());
     }
 
     /**
-     * Generate configuration JSON from current settings
+     * Generate configuration JSON
      */
     generateConfigJson() {
-        console.log('Context settings before JSON generation:', JSON.stringify(this.contextSettings));
-        
         const config = {
-            version: '1.0',
-            context: { ...this.contextSettings },
+            context: this.contextSettings,
             objects: []
         };
         
-        if (this.selectedObject && this.selectedFields.length > 0) {
-            config.objects.push({
+        if (this.selectedObject) {
+            const objectConfig = {
                 name: this.selectedObject,
                 count: this.recordCount,
                 fields: this.selectedFields
-            });
+            };
+            
+            config.objects.push(objectConfig);
         }
         
-        console.log('Generated config with context:', JSON.stringify(config.context));
-        const configJson = JSON.stringify(config, null, 2);
-        
-        // Dispatch configuration change event
-        this.dispatchConfigChange(configJson);
-        
-        return configJson;
+        return JSON.stringify(config, null, 2);
     }
-    
+
     /**
      * Dispatch configuration change event
      */
     dispatchConfigChange(configJson) {
-        this.dispatchEvent(new CustomEvent('configchange', {
+        const configChangeEvent = new CustomEvent('configchange', {
             detail: { configJson }
-        }));
-    }
-
-    /**
-     * Handle modal close
-     */
-    handleModalClose() {
-        this.showTemplateModal = false;
-    }
-
-    /**
-     * Template input change handler
-     */
-    handleTemplateInputChange(event) {
-        const field = event.target.name;
-        if (field === 'isActive') {
-            this.templateData = { ...this.templateData, [field]: event.target.checked };
-        } else {
-            this.templateData = { ...this.templateData, [field]: event.target.value };
-        }
+        });
+        this.dispatchEvent(configChangeEvent);
     }
 
     /**
@@ -540,12 +340,18 @@ export default class SeederConfiguration extends LightningElement {
     }
 
     /**
-     * Handle error with toast notification
+     * Handle errors
      */
     handleError(error, fallbackMessage) {
         console.error(error);
-        const message = error.body?.message || error.message || fallbackMessage;
-        this.showToast('Error', message, 'error');
-        this.error = message;
+        let errorMessage = fallbackMessage;
+        
+        if (error.body && error.body.message) {
+            errorMessage = error.body.message;
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        this.showToast('Error', errorMessage, 'error');
     }
 } 

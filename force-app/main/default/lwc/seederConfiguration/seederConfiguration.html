@@ -1,143 +1,128 @@
 <template>
     <div class="slds-card">
         <lightning-card title="DataSeeder Configuration" icon-name="standard:template">
-            <div slot="actions">
-                <lightning-button-group>
-                    <lightning-button label="New Template" onclick={handleNewTemplate}></lightning-button>
-                    <lightning-button label="Edit" onclick={handleEditTemplate} disabled={disableTemplateActions}></lightning-button>
-                    <lightning-button label="Clone" onclick={handleCloneTemplate} disabled={disableTemplateActions}></lightning-button>
-                    <lightning-button label="Delete" onclick={handleDeleteTemplate} disabled={disableTemplateActions} variant="destructive"></lightning-button>
-                </lightning-button-group>
-            </div>
-            
             <div class="slds-p-horizontal_small">
-                <!-- Template Selection -->
-                <div class="slds-m-bottom_small">
-                    <lightning-combobox
-                        label="Select Template"
-                        placeholder="Choose a template"
-                        value={selectedTemplateId}
-                        options={templates}
-                        onchange={handleTemplateChange}>
-                    </lightning-combobox>
+                <!-- Context Configuration -->
+                <div class="slds-m-bottom_medium">
+                    <div class="slds-text-heading_small slds-m-bottom_small">Context Settings</div>
+                    <div class="slds-grid slds-gutters">
+                        <div class="slds-col">
+                            <lightning-combobox
+                                name="locale"
+                                label="Locale"
+                                value={contextSettings.locale}
+                                placeholder="Select locale"
+                                options={localeOptions}
+                                onchange={handleContextChange}>
+                            </lightning-combobox>
+                        </div>
+                        <div class="slds-col">
+                            <lightning-combobox
+                                name="industry"
+                                label="Industry Context"
+                                value={contextSettings.industry}
+                                placeholder="Select industry"
+                                options={industryOptions}
+                                onchange={handleContextChange}>
+                            </lightning-combobox>
+                        </div>
+                        <div class="slds-col">
+                            <lightning-combobox
+                                name="region"
+                                label="Region Context"
+                                value={contextSettings.region}
+                                placeholder="Select region"
+                                options={regionOptions}
+                                onchange={handleContextChange}>
+                            </lightning-combobox>
+                        </div>
+                    </div>
                 </div>
                 
-                <!-- Configuration Panel -->
-                <lightning-accordion allow-multiple-sections-open>
-                    <!-- Context Configuration -->
-                    <lightning-accordion-section name="context" label="Context Settings">
-                        <div class="slds-grid slds-gutters">
-                            <div class="slds-col">
-                                <lightning-combobox
-                                    name="locale"
-                                    label="Locale"
-                                    value={contextSettings.locale}
-                                    placeholder="Select locale"
-                                    options={localeOptions}
-                                    onchange={handleContextChange}>
-                                </lightning-combobox>
-                            </div>
-                            <div class="slds-col">
-                                <lightning-combobox
-                                    name="industry"
-                                    label="Industry Context"
-                                    value={contextSettings.industry}
-                                    placeholder="Select industry"
-                                    options={industryOptions}
-                                    onchange={handleContextChange}>
-                                </lightning-combobox>
-                            </div>
-                            <div class="slds-col">
-                                <lightning-combobox
-                                    name="region"
-                                    label="Region Context"
-                                    value={contextSettings.region}
-                                    placeholder="Select region"
-                                    options={regionOptions}
-                                    onchange={handleContextChange}>
-                                </lightning-combobox>
-                            </div>
-                        </div>
-                    </lightning-accordion-section>
-                    
-                    <!-- Object Configuration -->
-                    <lightning-accordion-section name="objects" label="Object Configuration">
-                        <div class="slds-grid slds-gutters slds-m-bottom_small">
-                            <div class="slds-col slds-size_3-of-4 slds-p-top_medium">
-                                <lightning-button
-                                    label="Configure Objects"
-                                    variant="brand"
-                                    onclick={handleConfigureObjects}
-                                    class="slds-m-bottom_small">
-                                </lightning-button>
-
-                                <template if:true={showObjectSelector}>
-                                    <div class="slds-box slds-m-top_small">
-                                        <lightning-combobox
-                                            label="Select Object"
-                                            placeholder="Choose an object"
-                                            value={selectedObject}
-                                            options={objectOptions}
-                                            onchange={handleObjectChange}>
-                                        </lightning-combobox>
-                                    </div>
-                                </template>
-                            </div>
-                            <div class="slds-col slds-size_1-of-4">
-                                <lightning-input 
-                                    type="number" 
-                                    label="Number of Records" 
-                                    value={recordCount}
-                                    min="1"
-                                    max={MAX_TOTAL_RECORDS}
-                                    message-when-range-overflow={rangeOverflowMessage}
-                                    message-when-range-underflow="At least 1 record is required"
-                                    onchange={handleRecordCountChange}>
-                                </lightning-input>
-                            </div>
-                        </div>
-                        
-                        <!-- Field Configuration -->
-                        <div class="slds-m-top_small">
+                <!-- Object Configuration -->
+                <div class="slds-m-top_medium slds-m-bottom_medium">
+                    <div class="slds-text-heading_small slds-m-bottom_small">Object Configuration</div>
+                    <div class="slds-grid slds-gutters slds-m-bottom_small">
+                        <div class="slds-col slds-size_3-of-4 slds-p-top_medium">
                             <lightning-button
-                                label="Configure Fields"
+                                label="Configure Objects"
                                 variant="brand"
-                                onclick={handleConfigureFields}
-                                disabled={disableFieldConfig}
+                                onclick={handleConfigureObjects}
                                 class="slds-m-bottom_small">
                             </lightning-button>
 
-                            <template if:true={showFieldSelector}>
+                            <template if:true={showObjectSelector}>
                                 <div class="slds-box slds-m-top_small">
-                                    <lightning-dual-listbox
-                                        name="fields"
-                                        label={fieldSelectionLabel}
-                                        source-label="Available Fields"
-                                        selected-label="Selected Fields"
-                                        options={fieldOptions}
-                                        value={selectedFieldValues}
-                                        onchange={handleFieldSelection}>
-                                    </lightning-dual-listbox>
+                                    <p class="slds-text-body_small slds-m-bottom_x-small">
+                                        Showing all objects where you can create records
+                                    </p>
+                                    <lightning-combobox
+                                        label="Select Object"
+                                        placeholder="Choose an object"
+                                        value={selectedObject}
+                                        options={objectOptions}
+                                        onchange={handleObjectChange}>
+                                    </lightning-combobox>
                                 </div>
                             </template>
                         </div>
-                        
-                        <!-- Selected Fields Display -->
-                        <template if:true={selectedFields.length}>
-                            <div class="slds-m-top_small">
-                                <div class="slds-text-heading_small slds-m-bottom_x-small">Selected Fields:</div>
-                                <div class="slds-box">
-                                    <lightning-datatable
-                                        key-field="name"
-                                        data={selectedFields}
-                                        columns={fieldColumns}
-                                        hide-checkbox-column>
-                                    </lightning-datatable>
-                                </div>
+                        <div class="slds-col slds-size_1-of-4">
+                            <lightning-input 
+                                type="number" 
+                                label="Number of Records" 
+                                value={recordCount}
+                                min="1"
+                                max={MAX_TOTAL_RECORDS}
+                                message-when-range-overflow={rangeOverflowMessage}
+                                message-when-range-underflow="At least 1 record is required"
+                                onchange={handleRecordCountChange}>
+                            </lightning-input>
+                        </div>
+                    </div>
+                    
+                    <!-- Field Configuration -->
+                    <div class="slds-m-top_small">
+                        <lightning-button
+                            label="Configure Fields"
+                            variant="brand"
+                            onclick={handleConfigureFields}
+                            disabled={disableFieldConfig}
+                            class="slds-m-bottom_small">
+                        </lightning-button>
+
+                        <template if:true={showFieldSelector}>
+                            <div class="slds-box slds-m-top_small">
+                                <p class="slds-text-body_small slds-m-bottom_x-small">
+                                    Lookup/Reference fields, external IDs, and non-updateable fields are excluded. Required fields are pre-selected.
+                                </p>
+                                <lightning-dual-listbox
+                                    name="fields"
+                                    label={fieldSelectionLabel}
+                                    source-label="Available Fields"
+                                    selected-label="Selected Fields"
+                                    options={fieldOptions}
+                                    value={selectedFieldValues}
+                                    onchange={handleFieldSelection}>
+                                </lightning-dual-listbox>
                             </div>
                         </template>
-                    </lightning-accordion-section>
-                </lightning-accordion>
+                    </div>
+                    
+                    <!-- Selected Fields Display -->
+                    <template if:true={selectedFields.length}>
+                        <div class="slds-m-top_small">
+                            <div class="slds-text-heading_small slds-m-bottom_x-small">Selected Fields:</div>
+                            <div class="slds-box">
+                                <lightning-datatable
+                                    key-field="name"
+                                    data={selectedFields}
+                                    columns={fieldColumns}
+                                    hide-checkbox-column>
+                                </lightning-datatable>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
             
             <!-- Loading Spinner -->

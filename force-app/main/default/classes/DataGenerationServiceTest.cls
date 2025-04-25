@@ -16,14 +16,29 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
-        Map<String, List<SObject>> result = DataGenerationService.generateData(configJson);
+        Map<String, Object> result = DataGenerationService.generateData(configJson);
         Test.stopTest();
         
         // Verify results
         System.assertNotEquals(null, result, 'Result should not be null');
-        System.assertEquals(1, result.size(), 'Should create data for one object');
-        System.assert(result.containsKey('Account'), 'Should contain Account data');
-        System.assertEquals(2, result.get('Account').size(), 'Should create 2 Account records');
+        
+        // Get the objects list from the result
+        List<Map<String, Object>> objectsList = (List<Map<String, Object>>)result.get('objects');
+        System.assertNotEquals(null, objectsList, 'Objects list should not be null');
+        System.assertEquals(1, objectsList.size(), 'Should create data for one object');
+        
+        // Find the Account object data
+        Map<String, Object> accountData = null;
+        for(Map<String, Object> objData : objectsList) {
+            if('Account'.equals(objData.get('name'))) {
+                accountData = objData;
+                break;
+            }
+        }
+        
+        System.assertNotEquals(null, accountData, 'Should contain Account data');
+        List<SObject> accounts = (List<SObject>)accountData.get('records');
+        System.assertEquals(2, accounts.size(), 'Should create 2 Account records');
     }
     
     /**
@@ -130,11 +145,23 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
-        Map<String, List<SObject>> result = DataGenerationService.generateData(configJson);
+        Map<String, Object> result = DataGenerationService.generateData(configJson);
         Test.stopTest();
         
         // Verify results
-        Account acc = (Account)result.get('Account')[0];
+        List<Map<String, Object>> objectsList = (List<Map<String, Object>>)result.get('objects');
+        Map<String, Object> accountData = null;
+        for(Map<String, Object> objData : objectsList) {
+            if('Account'.equals(objData.get('name'))) {
+                accountData = objData;
+                break;
+            }
+        }
+        
+        System.assertNotEquals(null, accountData, 'Should contain Account data');
+        List<SObject> accounts = (List<SObject>)accountData.get('records');
+        Account acc = (Account)accounts[0];
+        
         System.assertNotEquals(null, acc.Name, 'Name should be populated');
         System.assertNotEquals(null, acc.NumberOfEmployees, 'NumberOfEmployees should be populated');
         System.assertNotEquals(null, acc.Website, 'Website should be populated');
@@ -155,12 +182,30 @@ private class DataGenerationServiceTest {
         
         // Execute test
         Test.startTest();
-        Map<String, List<SObject>> result = DataGenerationService.generateData(configJson);
+        Map<String, Object> result = DataGenerationService.generateData(configJson);
         Test.stopTest();
         
         // Verify results
-        List<Account> accounts = (List<Account>)result.get('Account');
-        List<Contact> contacts = (List<Contact>)result.get('Contact');
+        List<Map<String, Object>> objectsList = (List<Map<String, Object>>)result.get('objects');
+        
+        // Find Account and Contact data
+        Map<String, Object> accountData = null;
+        Map<String, Object> contactData = null;
+        
+        for(Map<String, Object> objData : objectsList) {
+            String objName = (String)objData.get('name');
+            if('Account'.equals(objName)) {
+                accountData = objData;
+            } else if('Contact'.equals(objName)) {
+                contactData = objData;
+            }
+        }
+        
+        System.assertNotEquals(null, accountData, 'Should contain Account data');
+        System.assertNotEquals(null, contactData, 'Should contain Contact data');
+        
+        List<SObject> accounts = (List<SObject>)accountData.get('records');
+        List<SObject> contacts = (List<SObject>)contactData.get('records');
         
         System.assertEquals(2, accounts.size(), 'Should create 2 Account records');
         System.assertEquals(3, contacts.size(), 'Should create 3 Contact records');

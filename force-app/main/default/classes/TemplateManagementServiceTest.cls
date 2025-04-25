@@ -245,4 +245,35 @@ public class TemplateManagementServiceTest {
     private static String getValidJsonConfig() {
         return '{"objects": [{"name": "Account", "count": 2, "fields": [{"name": "Name", "type": "String"}]}]}';
     }
+    
+    /**
+     * Test retrieval of creatable objects
+     */
+    @isTest
+    static void testGetCreatableObjects() {
+        // Execute test
+        Test.startTest();
+        List<Map<String, String>> objects = TemplateManagementService.getCreatableObjects();
+        Test.stopTest();
+        
+        // Verify results
+        System.assertNotEquals(null, objects, 'Should return a list of objects');
+        System.assert(!objects.isEmpty(), 'Should return at least some objects');
+        
+        // Verify structure of returned data
+        for (Map<String, String> obj : objects) {
+            System.assert(obj.containsKey('label'), 'Each object should have a label');
+            System.assert(obj.containsKey('value'), 'Each object should have a value');
+        }
+        
+        // Verify Account is in the list (it should always be creatable)
+        Boolean hasAccount = false;
+        for (Map<String, String> obj : objects) {
+            if (obj.get('value') == 'Account') {
+                hasAccount = true;
+                break;
+            }
+        }
+        System.assert(hasAccount, 'Account should be in the list of creatable objects');
+    }
 } 
